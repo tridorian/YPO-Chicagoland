@@ -1,24 +1,32 @@
 #!/usr/bin/env bash
 # Graywing Ag Systems - Gemini Enterprise lab setup. Run in Cloud Shell of a fresh Qwiklabs project.
-# Steps: project -> APIs -> Gemini Enterprise app + Google Drive connector -> Drive access check ->
-# copy the demo data into your My Drive (emails and calendars are simulated as files there) -> print your links.
-# Safe to re-run: every step reuses earlier work.
+# Steps: project -> APIs -> find the lab's Gemini Enterprise app -> connect Google Drive, Gmail and Google Calendar
+# (search + actions) -> turn on app features, all models and Google Search -> Drive access check ->
+# install the upload-my-files command -> copy the demo data into your My Drive (emails and calendars are simulated
+# as files there) and make an empty "My Uploads" folder -> wait for the connectors, print your links.
+# Safe to re-run: every step reuses earlier work and only changes what is missing.
 # Everything is logged with timestamps to ~/graywing-lab/setup.log.
 set -uo pipefail
 
 # ---- settings -------------------------------------------------------------------------------------------
 DATA_URL="${DATA_URL:-https://raw.githubusercontent.com/tridorian/graywing-ge-lab/main/graywing-demo-data.zip}"          # gs://... or https://... zip of "Graywing Ag Systems (Demo Data)"
 LOCATION="${GE_LOCATION:-global}"            # Gemini Enterprise location: global | us | eu
-APP_ID="${APP_ID:-graywing-ag-systems}"
-APP_NAME="${APP_NAME:-Graywing Ag Systems}"
+APP_ID="${APP_ID:-}"                         # app to use; empty = the lab's existing app (first one found)
+NEW_APP_ID="${NEW_APP_ID:-graywing-ag-systems}"   # only used when the project has no app yet
+APP_NAME="${APP_NAME:-Graywing Ag Systems}"       # display name for a new app only; an existing app keeps its name
 COMPANY="${COMPANY:-Graywing Ag Systems}"
-DRIVE_STORE_ID="${DRIVE_STORE_ID:-graywing-drive}"
+CONNECTOR_PREFIX="${CONNECTOR_PREFIX:-graywing}"  # connector ids: graywing-drive, graywing-gmail, graywing-calendar
+MY_UPLOADS="${MY_UPLOADS_FOLDER:-My Uploads}"     # empty My Drive folder for your own files (see upload-my-files)
 WORK="${WORK:-$HOME/graywing-lab}"
+# Feature Management switches (key:ON|OFF). Merged into the app's existing settings; unknown keys are skipped.
+FEATURES_WANT="no-code-agent-builder:ON agent-gallery:ON prompt-gallery:ON notebook-lm:ON model-selector:ON
+  workflow-agents:ON multi-agent-orchestration:ON personalization-memory:ON disable-canvas:OFF canvas-app-builder:ON
+  disable-image-generation:OFF disable-video-generation:OFF disable-google-drive-upload:OFF disable-talk-to-content:OFF"
 # ---------------------------------------------------------------------------------------------------------
 
 mkdir -p "$WORK" || { echo "Can't create $WORK"; exit 1; }
 LOG="$WORK/setup.log"
-STEPS=6
+STEPS=9
 STEP=0
 T0=$SECONDS
 
@@ -61,11 +69,12 @@ case "$LOCATION" in
 esac
 
 printf '\n\033[1m  Graywing Ag Systems · Gemini Enterprise lab setup\033[0m\n'
-printf '  \033[2mTakes about 5 minutes. Progress is shown below; the full log is in %s\033[0m\n' "$LOG"
-log "######## setup started (DATA_URL=$DATA_URL LOCATION=$LOCATION APP_ID=$APP_ID)"
+printf '  \033[2mTakes 5-15 minutes (new connectors can take up to 10 to start). Full log: %s\033[0m\n' "$LOG"
+log "######## setup started (DATA_URL=$DATA_URL LOCATION=$LOCATION APP_ID=${APP_ID:-auto})"
 
 # ---- 1. project and account ------------------------------------------------------------------------------
 step "Checking your lab project and sign-in"
+for t in python3 curl unzip; do command -v "$t" >/dev/null || die "This needs $t, which Cloud Shell normally has. Run it in Cloud Shell."; done
 PROJECT="${GOOGLE_CLOUD_PROJECT:-$(gcloud config get-value project 2>/dev/null)}"
 if [ -z "$PROJECT" ] || [ "$PROJECT" = "(unset)" ]; then
   PROJECT="$(gcloud projects list --format='value(projectId)' --filter='projectId:qwiklabs-gcp-*' --limit=1 2>/dev/null)"
@@ -85,28 +94,31 @@ spin "Enabling Gemini Enterprise (Discovery Engine), Google Drive and Cloud Stor
   || die "Could not enable the APIs (see $LOG)."
 ok "APIs enabled: Discovery Engine, Google Drive, Cloud Storage"
 
-# ---- 3. Gemini Enterprise --------------------------------------------------------------------------------
-step "Setting up the Gemini Enterprise app"
+# ---- 3. Gemini Enterprise app ----------------------------------------------------------------------------
+step "Finding your Gemini Enterprise app"
 BASE="$HOST/v1alpha/projects/$PROJECT/locations/$LOCATION"
 BASE_V1="$HOST/v1/projects/$PROJECT/locations/$LOCATION"
+# connector resources answer only to the project number (the project id gives "Invalid data connector name")
+NBASE="$HOST/v1alpha/projects/$PROJECT_NUMBER/locations/$LOCATION"
 
 api() {  # api METHOD URL [JSON]  -> $CODE (HTTP status) and $BODY; every call is logged
   local out; out="$(mktemp)"
   local args=(-s -o "$out" -w '%{http_code}' -X "$1" -H "Authorization: Bearer $(gcloud auth print-access-token 2>/dev/null)"
-              -H "X-Goog-User-Project: $PROJECT" -H "Content-Type: application/json")
+              -H "X-Goog-User-Project: $PROJECT" -H "Content-Type: application/json" --max-time 120)
   [ -n "${3:-}" ] && args+=(--data "$3")
   CODE="$(curl "${args[@]}" "$2")"; BODY="$(cat "$out")"; rm -f "$out"
   log "API   $1 ${2#https://} -> $CODE"
   case "$CODE" in 2*) ;; *) log "      ${BODY:0:600}" ;; esac
 }
-jv() {  # jv 'python expression on d' -> prints it from $BODY ('' when missing)
-  printf '%s' "$BODY" | python3 -c 'import json,sys
+jv() {  # jv 'python expression on d' [JSON] -> prints it from JSON (default $BODY; '' when missing)
+  printf '%s' "${2-$BODY}" | python3 -c 'import json,sys
 try: d=json.loads(sys.stdin.read() or "{}")
 except Exception: d={}
 try: v=eval(sys.argv[1])
 except Exception: v=""
 print("" if v is None else v)' "$1"
 }
+err() { jv 'd["error"]["message"]'; }
 wait_op() {  # wait_op OPERATION_NAME  (up to 5 minutes)
   for _ in $(seq 100); do
     api GET "$HOST/v1alpha/$1"
@@ -116,15 +128,15 @@ wait_op() {  # wait_op OPERATION_NAME  (up to 5 minutes)
   return 1
 }
 
-# 3a. Google identity for this location (the console's "Use Google Identity")
+# 3a. Google identity for this location (the console's "Use Google Identity"); the lab usually has it already
 api GET "$BASE/aclConfig"
 if [ "$(jv 'd["idpConfig"]["idpType"]')" != "GSUITE" ]; then
   api PATCH "$BASE/aclConfig" "{\"name\":\"projects/$PROJECT/locations/$LOCATION/aclConfig\",\"idpConfig\":{\"idpType\":\"GSUITE\"}}"
-  [ "$CODE" = 200 ] || die "Could not set Google identity ($CODE): $(jv 'd["error"]["message"]')"
+  [ "$CODE" = 200 ] || die "Could not set Google identity ($CODE): $(err)"
 fi
 ok "Sign-in method: Google Identity"
 
-# 3b. Seats: the lab's 30-day trial must be active; new users get a seat automatically
+# 3b. Seats: the lab's trial must be active; new users get a seat automatically
 api GET "$BASE_V1/licenseConfigs"
 LICENSE="$(jv '[c["name"] for c in d.get("licenseConfigs",[]) if c.get("state")=="ACTIVE"][0]')"
 if [ -z "$LICENSE" ]; then
@@ -144,51 +156,83 @@ if [ "$(jv 'd.get("enableLicenseAutoRegister", False)')" != "True" ]; then
 fi
 ok "License: $(basename "$LICENSE") (a seat is given automatically on first sign-in)"
 
-# 3c. Google Drive connector (federated: searches each person's own Drive, nothing is copied)
-connector() {  # connector SOURCE COLLECTION_ID "Display name"  -> sets DS (the connector's data store id)
-  local url="$BASE/collections/$2/dataConnector"
+# 3c. The app: $APP_ID if it exists, else the first Gemini Enterprise (intranet) app; made in step 4 if there is none
+api GET "$BASE/collections/default_collection/engines?pageSize=100"
+[ "$CODE" = 200 ] || die "Could not list the Gemini Enterprise apps ($CODE): $(err)"
+FOUND="$(WANT="$APP_ID" jv '([e["name"].split("/")[-1] for e in d.get("engines",[]) if e["name"].split("/")[-1]==__import__("os").environ["WANT"]]
+  + [e["name"].split("/")[-1] for e in d.get("engines",[]) if e.get("appType")=="APP_TYPE_INTRANET"] + [""])[0]')"
+[ -n "$APP_ID" ] && [ -n "$FOUND" ] && [ "$FOUND" != "$APP_ID" ] && warn "No app called $APP_ID here; using $FOUND instead."
+NEW_APP=""
+if [ -n "$FOUND" ]; then
+  APP_ID="$FOUND"
+  ENGINE="$BASE/collections/default_collection/engines/$APP_ID"
+  api GET "$ENGINE"
+  [ "$CODE" = 200 ] || die "Could not read the app $APP_ID ($CODE): $(err)"
+  APP_TITLE="$(jv 'd.get("displayName","")')"
+  ok "App: ${APP_TITLE:-$APP_ID} (id $APP_ID)"
+else
+  APP_ID="${APP_ID:-$NEW_APP_ID}"; NEW_APP=1; APP_TITLE="$APP_NAME"
+  ENGINE="$BASE/collections/default_collection/engines/$APP_ID"
+  info "No Gemini Enterprise app in this project yet; one called \"$APP_NAME\" is made in the next step."
+fi
+
+# ---- 4. connectors ---------------------------------------------------------------------------------------
+step "Connecting Google Drive, Gmail and Google Calendar"
+# Federated (each person's own Drive, mail and calendar are searched live; nothing is copied) plus actions
+# (create files, send or draft email, add events). Google runs the sign-in: each user clicks Authorize once in the app.
+CONNECTORS=("google_drive|$CONNECTOR_PREFIX-drive|Google Drive" "google_mail|$CONNECTOR_PREFIX-gmail|Gmail"
+            "google_calendar|$CONNECTOR_PREFIX-calendar|Google Calendar")
+body() {  # body MODES_JSON -> setUpDataConnector request for $SRC_NAME / $CID / $CNAME
+  printf '{"collectionId":"%s","collectionDisplayName":"%s","dataConnector":{"dataSource":"%s","refreshInterval":"0s","connectorModes":%s,"entities":[{"entityName":"%s"}],"params":{}}}' \
+    "$CID" "$CNAME" "$SRC_NAME" "$1" "$SRC_NAME"
+}
+CIDS=(); DS_IDS=(); NO_ACTIONS=()
+for c in "${CONNECTORS[@]}"; do
+  IFS='|' read -r SRC_NAME CID CNAME <<<"$c"
+  CIDS+=("$CID")
+  url="$NBASE/collections/$CID/dataConnector"
   api GET "$url"
   if [ "$CODE" = 404 ]; then
-    api POST "$BASE:setUpDataConnector" "{\"collectionId\":\"$2\",\"collectionDisplayName\":\"$3\",
-      \"dataConnector\":{\"dataSource\":\"$1\",\"refreshInterval\":\"0s\",\"connectorModes\":[\"FEDERATED\"],
-      \"entities\":[{\"entityName\":\"$1\"}],\"params\":{}}}"
-    [ "$CODE" = 200 ] || die "Could not create the $3 connector ($CODE): $(jv 'd["error"]["message"]')"
-    info "$3 connector created, waiting for it to become active..."
+    api POST "$BASE:setUpDataConnector" "$(body '["FEDERATED","ACTIONS"]')"
+    if [ "$CODE" != 200 ]; then
+      log "connector with actions refused; trying search only"
+      api POST "$BASE:setUpDataConnector" "$(body '["FEDERATED"]')"
+      [ "$CODE" = 200 ] || die "Could not create the $CNAME connector ($CODE): $(err)"
+      NO_ACTIONS+=("$CNAME")
+    fi
+    for _ in $(seq 20); do api GET "$url"; [ -n "$(jv 'd["entities"][0]["dataStore"]')" ] && break; sleep 3; done
+    ok "$CNAME connector created ($(jv 'd.get("state","starting")' | tr 'A-Z' 'a-z'); it finishes starting in the background)"
+  elif [ "$CODE" = 200 ]; then
+    if [ "$(jv '"ACTIONS" in d.get("connectorModes",[])')" != "True" ]; then
+      api PATCH "$url?updateMask=connectorModes" '{"connectorModes":["FEDERATED","ACTIONS"]}'
+      if [ "$CODE" = 200 ]; then api GET "$url"; else NO_ACTIONS+=("$CNAME"); fi
+    fi
+    ok "$CNAME connector: $(jv 'd.get("state","")' | tr 'A-Z' 'a-z')"
+  else
+    die "Could not read the $CNAME connector ($CODE): $(err)"
   fi
-  for _ in $(seq 200); do
-    api GET "$url"
-    STATE="$(jv 'd.get("state","")')"
-    DS="$(jv 'd["entities"][0]["dataStore"].split("/")[-1]')"
-    [ "$STATE" = ACTIVE ] && [ -n "$DS" ] && return 0
-    [ "$STATE" = FAILED ] && die "The $3 connector failed: $(jv 'd.get("errors","")')"
-    sleep 3
-  done
-  die "The $3 connector is still '${STATE:-unknown}' after 10 minutes. Paste the script again later."
-}
-DS_IDS=()
-for c in "google_drive|$DRIVE_STORE_ID|Google Drive"; do
-  IFS='|' read -r SRC_NAME CID CNAME <<<"$c"
-  connector "$SRC_NAME" "$CID" "$CNAME"
+  DS="$(jv 'd["entities"][0]["dataStore"].split("/")[-1]')"
+  [ -n "$DS" ] || die "The $CNAME connector has no data store yet. Paste the script again in a minute."
   DS_IDS+=("$DS")
-  ok "$CNAME connector: active"
 done
 DS_JSON="$(printf '%s\n' "${DS_IDS[@]}" | python3 -c 'import json,sys; print(json.dumps(sys.stdin.read().split()))')"
+for n in "${NO_ACTIONS[@]}"; do
+  warn "$n: actions could not be switched on here (search works). To add them in the console: Gemini Enterprise >"
+  info "Data stores > $n > Actions > Enable actions > tick the actions > Enable actions."
+done
 
-# 3d. The app
-ENGINE="$BASE/collections/default_collection/engines/$APP_ID"
-api GET "$ENGINE"
-if [ "$CODE" = 200 ]; then
-  HAVE="$(jv "__import__('json').dumps(d.get('dataStoreIds', []))")"
-  IDS="$(jv "__import__('json').dumps(d.get('dataStoreIds', []) + [x for x in $DS_JSON if x not in d.get('dataStoreIds', [])])")"
-  if [ "$IDS" = "$HAVE" ]; then
-    ok "App already set up: $APP_NAME"
-  else
-    api PATCH "$ENGINE?updateMask=dataStoreIds" "{\"dataStoreIds\":$IDS}"
-    [ "$CODE" = 200 ] || die "Could not add the connectors to the app ($CODE): $(jv 'd["error"]["message"]')"
-    ok "Added the missing connectors to $APP_NAME"
-  fi
-fi
-if [ "$CODE" = 404 ]; then
+attach() {  # adds the connectors' data stores to the app, keeping anything already there
+  ATTACHED=""; ATTACH_MSG="Connectors already in"   # ATTACHED=1 on success
+  api GET "$ENGINE"
+  [ "$CODE" = 200 ] || return 1
+  local have ids
+  have="$(jv 'json.dumps(d.get("dataStoreIds", []))' | sed 's/^$/[]/')"
+  ids="$(jv "json.dumps(d.get('dataStoreIds', []) + [x for x in $DS_JSON if x not in d.get('dataStoreIds', [])])")"
+  [ "$ids" = "$have" ] && { ATTACHED=1; return 0; }
+  api PATCH "$ENGINE?updateMask=dataStoreIds" "{\"dataStoreIds\":$ids}"
+  [ "$CODE" = 200 ] && { ATTACHED=1; ATTACH_MSG="Connectors added to"; }
+}
+if [ -n "$NEW_APP" ]; then
   api POST "$BASE/collections/default_collection/engines?engineId=$APP_ID" "{
     \"displayName\":\"$APP_NAME\",\"solutionType\":\"SOLUTION_TYPE_SEARCH\",\"industryVertical\":\"GENERIC\",
     \"appType\":\"APP_TYPE_INTRANET\",\"dataStoreIds\":$DS_JSON,\"commonConfig\":{\"companyName\":\"$COMPANY\"},
@@ -196,43 +240,131 @@ if [ "$CODE" = 404 ]; then
       \"requiredSubscriptionTier\":\"SUBSCRIPTION_TIER_SEARCH_AND_ASSISTANT\"},
     \"knowledgeGraphConfig\":{\"enablePrivateKnowledgeGraph\":true},
     \"sessionConfig\":{\"sessionManagementPolicy\":\"VERTEX_AI_MANAGED\"},
-    \"observabilityConfig\":{\"observabilityEnabled\":true},
-    \"features\":{\"no-code-agent-builder\":\"FEATURE_STATE_ON\",\"agent-gallery\":\"FEATURE_STATE_ON\",
-      \"prompt-gallery\":\"FEATURE_STATE_ON\",\"notebook-lm\":\"FEATURE_STATE_ON\",\"model-selector\":\"FEATURE_STATE_ON\",
-      \"workflow-agents\":\"FEATURE_STATE_ON\",\"agent-sharing-without-admin-approval\":\"FEATURE_STATE_ON\",
-      \"disable-agent-sharing\":\"FEATURE_STATE_OFF\",\"personalization-memory\":\"FEATURE_STATE_ON\",
-      \"people-search-org-chart\":\"FEATURE_STATE_ON\",\"disable-google-drive-upload\":\"FEATURE_STATE_OFF\",
-      \"disable-image-generation\":\"FEATURE_STATE_OFF\",\"disable-video-generation\":\"FEATURE_STATE_OFF\",
-      \"disable-talk-to-content\":\"FEATURE_STATE_OFF\"}}"
-  [ "$CODE" = 200 ] || die "Could not create the app ($CODE): $(jv 'd["error"]["message"]')"
+    \"observabilityConfig\":{\"observabilityEnabled\":true}}"
+  [ "$CODE" = 200 ] || die "Could not create the app ($CODE): $(err)"
   OP="$(jv 'd["name"]')"
   if [ "$(jv 'd.get("done", False)')" != "True" ]; then
     spin "Creating the app" wait_op "$OP" || die "App creation did not finish (see $LOG)."
   fi
-  ok "App created: $APP_NAME (Google Drive connected)"
-elif [ "$CODE" != 200 ]; then
-  die "Could not read the app ($CODE): $(jv 'd["error"]["message"]')"
-fi
-
-# 3e. Google Search off: answers come from the Graywing files, not the web
-api PATCH "$ENGINE/assistants/default_assistant?updateMask=webGroundingType" \
-  '{"webGroundingType":"WEB_GROUNDING_TYPE_DISABLED"}'
-if [ "$CODE" = 200 ] && [ "$(jv 'd.get("webGroundingType","")')" = "WEB_GROUNDING_TYPE_DISABLED" ]; then
-  ok "Google Search: off (answers use the Graywing files only)"
+  ok "App created: $APP_NAME (Google Drive, Gmail and Google Calendar connected)"
+  ATTACHED=1
 else
-  warn "Could not turn off Google Search ($CODE): $(jv 'd["error"]["message"]'). Turn it off under Configurations > Assistant."
+  attach
+  if [ -n "$ATTACHED" ]; then
+    ok "$ATTACH_MSG ${APP_TITLE:-$APP_ID}"
+  else
+    info "The app doesn't take the new connectors yet; trying again once they are active (last step)."
+  fi
+fi
+if [ "${#NO_ACTIONS[@]}" = 0 ]; then
+  info "Actions (create files, send or draft email, add events) are switched on. To review or pick them:"
+  info "console > Gemini Enterprise > Data stores > (Google Drive / Gmail / Google Calendar) > Actions."
 fi
 
-api GET "$ENGINE/widgetConfigs/default_search_widget_config"
+# ---- 5. features, models, Google Search ------------------------------------------------------------------
+step "Turning on the app's features, models and Google Search"
+TURNED_ON=()
+# 5a. Feature Management. updateMask=features replaces the whole map, so merge into what is there.
+#     Keys are checked against the API's published list (unknown keys are accepted silently, so we skip them).
+api GET "$ENGINE"
+[ "$CODE" = 200 ] || die "Could not read the app ($CODE): $(err)"
+ENGINE_JSON="$BODY"
+curl -s --max-time 60 "https://discoveryengine.googleapis.com/\$discovery/rest?version=v1alpha" -o "$WORK/.discovery.json" 2>>"$LOG"
+MERGE="$(printf '%s' "$ENGINE_JSON" | python3 -c 'import json,re,sys
+eng = json.loads(sys.stdin.read() or "{}")
+try:
+    with open(sys.argv[1], encoding="utf-8") as fh:
+        desc = json.load(fh)["schemas"]["GoogleCloudDiscoveryengineV1alphaEngine"]["properties"]["features"]["description"]
+    known = set(re.findall(r"`([a-z0-9-]+)`", desc))
+except Exception:
+    known = set()
+have = eng.get("features") or {}
+want = dict(x.split(":") for x in sys.argv[2].split())
+dropped = sorted(k for k in want if known and k not in known)
+merged = dict(have)
+merged.update({k: "FEATURE_STATE_" + v for k, v in want.items() if k not in dropped})
+print(json.dumps({"dropped": dropped, "checked": bool(known), "changed": merged != have, "features": merged}))' \
+  "$WORK/.discovery.json" "$FEATURES_WANT")"
+[ -n "$MERGE" ] || die "Could not work out the feature settings (see $LOG)."
+[ "$(jv 'd["checked"]' "$MERGE")" = True ] || warn "Could not load the list of feature names; setting them all as given."
+for k in $(jv '" ".join(d["dropped"])' "$MERGE"); do warn "Skipped feature '$k': this API version doesn't know it."; done
+if [ "$(jv 'd["changed"]' "$MERGE")" = True ]; then
+  api PATCH "$ENGINE?updateMask=features" "$(jv 'json.dumps({"features": d["features"]})' "$MERGE")"
+  [ "$CODE" = 200 ] || die "Could not update the app's features ($CODE): $(err)"
+  api GET "$ENGINE"
+fi
+MISSING="$(WANT="$(jv 'json.dumps(d["features"])' "$MERGE")" jv '" ".join(k for k, v in json.loads(__import__("os").environ["WANT"]).items() if (d.get("features") or {}).get(k) != v)')"
+if [ -z "$MISSING" ]; then
+  ok "Features on: agent designer (no-code agents + workflows, multi-agent), agent and prompt gallery, model selector,"
+  info "  Canvas and its app builder, image and video generation, NotebookLM, memory, Drive upload, talk to content"
+  TURNED_ON+=("no-code agents" "Canvas" "image and video generation")
+else
+  warn "These features did not stick: $MISSING (set them under Configurations > Feature Management)."
+fi
+
+# 5b. Models: every model an admin may switch (read from the console's own admin view) -> enabled on the app
+api GET "$ENGINE/widgetConfigs/default_search_widget_config?modelInfoView=ADMIN"
+[ "$CODE" = 200 ] || die "Could not read the app's settings ($CODE): $(err)"
 CONFIG_ID="$(jv 'd["configId"]')"
+MODELS="$(jv '" ".join(m["modelId"] for m in d.get("uiSettings",{}).get("modelConfigInfo",{}).get("resolvedModels",[]) if m.get("modelId") and m.get("adminView",{}).get("adminOverridable"))')"
+set_models() {  # set_models "id id ..." -> merges MODEL_ENABLED for them into the app's modelConfigs
+  api GET "$ENGINE"
+  local cfg; cfg="$(WANT="$1" jv 'json.dumps({"modelConfigs": dict(d.get("modelConfigs") or {}, **{m: "MODEL_ENABLED" for m in __import__("os").environ["WANT"].split()})})')"
+  [ "$(jv 'json.dumps(d.get("modelConfigs") or {}, sort_keys=True)')" = "$(jv 'json.dumps(d["modelConfigs"], sort_keys=True)' "$cfg")" ] && return 0
+  api PATCH "$ENGINE?updateMask=modelConfigs" "$cfg"
+  [ "$CODE" = 200 ]
+}
+if [ -z "$MODELS" ]; then
+  warn "Could not read the list of models; turn them on under Configurations > Feature Management."
+else
+  if ! set_models "$MODELS"; then
+    warn "The app refused some models ($CODE: $(err)); trying again without the Claude models."
+    set_models "$(printf '%s\n' $MODELS | grep -v '^claude' | tr '\n' ' ')" || warn "Could not turn on the models ($CODE): $(err)"
+  fi
+  api GET "$ENGINE"
+  ON="$(WANT="$MODELS" jv '" ".join(m for m in __import__("os").environ["WANT"].split() if (d.get("modelConfigs") or {}).get(m) == "MODEL_ENABLED")')"
+  OFF="$(WANT="$MODELS" jv '" ".join(m for m in __import__("os").environ["WANT"].split() if (d.get("modelConfigs") or {}).get(m) != "MODEL_ENABLED")')"
+  ok "Models on ($(wc -w <<<"$ON" | tr -d ' ')): $ON"
+  [ -n "$OFF" ] && warn "Models not switched on: $OFF"
+  TURNED_ON+=("$(wc -w <<<"$ON" | tr -d ' ') models")
+  CLAUDE="$(printf '%s\n' $ON | grep '^claude' | head -1)"
+  if [ -n "$CLAUDE" ]; then  # one tiny test question tells whether Claude can answer yet (it needs pay-as-you-go)
+    api POST "$ENGINE/assistants/default_assistant:streamAssist" \
+      "{\"query\":{\"text\":\"Reply with the single word OK.\"},\"generationSpec\":{\"modelId\":\"$CLAUDE\"}}"
+    if [ "$CODE" = 200 ]; then
+      ok "Claude models answer (pay-as-you-go is on for this project)"
+      TURNED_ON+=("Claude")
+    else
+      case "$BODY" in *OVERAGE*) why="it needs pay-as-you-go usage, which this lab's trial doesn't include" ;;
+        *) why="$(err)" ;; esac
+      warn "Claude models are switched on but can't answer yet: $why."
+      TURNED_ON[${#TURNED_ON[@]}-1]+=" (Claude needs pay-as-you-go)"
+      info "If your project has billing: console > Gemini Enterprise > Apps > ${APP_TITLE:-$APP_ID} > Configurations >"
+      info "Feature Management > Enable third-party models > switch Claude on > Go to Usage & spend (turn on pay-as-you-go)"
+      info "> Agree to the terms > Save. The Gemini models work without this."
+    fi
+  fi
+fi
+
+# 5c. Google Search grounding on (answers can use the web as well as your files)
+api GET "$ENGINE/assistants/default_assistant"
+if [ "$(jv 'd.get("webGroundingType","")')" != "WEB_GROUNDING_TYPE_GOOGLE_SEARCH" ]; then
+  api PATCH "$ENGINE/assistants/default_assistant?updateMask=webGroundingType" '{"webGroundingType":"WEB_GROUNDING_TYPE_GOOGLE_SEARCH"}'
+fi
+if [ "$(jv 'd.get("webGroundingType","")')" = "WEB_GROUNDING_TYPE_GOOGLE_SEARCH" ]; then
+  ok "Google Search: on"
+  TURNED_ON=("Google Search" "${TURNED_ON[@]}")
+else
+  warn "Could not turn on Google Search ($CODE): $(err). Turn it on under Configurations > Assistant."
+fi
+
 [ -n "$CONFIG_ID" ] || die "Could not read the app's web address."
 case "$LOCATION" in global) WEB_URL="https://vertexaisearch.cloud.google.com/home/cid/$CONFIG_ID" ;;
   *) WEB_URL="https://vertexaisearch.cloud.google.com/$LOCATION/home/cid/$CONFIG_ID" ;; esac
 CONSOLE_URL="https://console.cloud.google.com/gemini-enterprise/locations/$LOCATION/engines/$APP_ID/overview?project=$PROJECT"
 ok "App link: $WEB_URL"
-printf 'GEMINI_ENTERPRISE_APP=%s\nADMIN_CONSOLE=%s\n' "$WEB_URL" "$CONSOLE_URL" > "$WORK/links.txt"
 
-# ---- 4. Drive access -------------------------------------------------------------------------------------
+# ---- 6. Drive access -------------------------------------------------------------------------------------
 step "Checking Google Drive access"
 has_drive_scope() {
   local t; t="$(gcloud auth print-access-token 2>/dev/null)" || return 1
@@ -253,32 +385,142 @@ else
   ok "Google Drive access approved"
 fi
 
-# ---- 5. demo data into My Drive -------------------------------------------------------------------------
-step "Copying the Graywing demo data into your Google Drive"
-cd "$WORK" || die "Can't open $WORK"
-rm -f data.zip
-case "$DATA_URL" in
-  gs://*) spin "Downloading the demo data" gcloud storage cp "$DATA_URL" data.zip --quiet ;;
-  *) spin "Downloading the demo data" curl -fsSL "$DATA_URL" -o data.zip ;;
+# ---- 7. upload-my-files command --------------------------------------------------------------------------
+step "Installing the upload-my-files command"
+# A verbatim copy of setup/upload-my-files.sh from the lab repo; its Drive uploader is also used for the demo data below.
+mkdir -p "$HOME/bin" || die "Can't create $HOME/bin"
+cat > "$HOME/bin/upload-my-files" <<'UPLOAD_MY_FILES_EOF'
+#!/usr/bin/env bash
+# upload-my-files - copy your own files from Cloud Shell into the "My Uploads" folder in your Google Drive,
+# so your Gemini Enterprise agents can use them next to the Graywing demo data.
+#
+#   upload-my-files              uploads everything in ~/my-files (subfolders are kept)
+#   upload-my-files <folder>     uploads everything in <folder> instead
+#
+# Put files in ~/my-files first with Cloud Shell's own Upload (the ⋮ menu at the top right of the terminal).
+# Word, Excel and PowerPoint files become Google Docs, Sheets and Slides (easier for the agent to read).
+# Safe to re-run: files already in "My Uploads" (same name) are skipped, so nothing is duplicated.
+# Needs the lab setup (graywing-setup.sh) to have run once: it approves Google Drive access for this sign-in.
+# Settings: MY_UPLOADS_FOLDER="Other name" (a top-level My Drive folder, created if missing) or a Drive folder link.
+# Everything is logged with timestamps to ~/graywing-lab/setup.log.
+set -uo pipefail
+
+# ---- settings -------------------------------------------------------------------------------------------
+SRC="${1:-$HOME/my-files}"
+TARGET="${MY_UPLOADS_FOLDER:-My Uploads}"
+case "$TARGET" in   # a Drive folder link or "id:<folder id>" means that exact folder, not a name
+  *drive.google.com/*folders/*|id:*) LABEL="Drive folder you chose" ;;
+  *) LABEL="\"$TARGET\" folder" ;;
 esac
-[ -s data.zip ] || die "Could not download the demo data from $DATA_URL"
-rm -rf data && mkdir data && unzip -q data.zip -d data || die "The demo data zip is damaged."
-DATA_DIR="$(find data -mindepth 1 -maxdepth 1 -type d | head -1)"
-ok "Downloaded $(find "$DATA_DIR" -type f | wc -l | tr -d ' ') files ($(du -sh data.zip | cut -f1))"
+WORK="${WORK:-$HOME/graywing-lab}"
+if [ -f "$HOME/graywing-setup.sh" ]; then SETUP_CMD="bash ~/graywing-setup.sh"   # the paste-in setup leaves this file
+else SETUP_CMD="bash <(curl -fsSL https://raw.githubusercontent.com/tridorian/YPO-Chicagoland/main/setup/graywing-setup.sh)"; fi
+# ---------------------------------------------------------------------------------------------------------
+
+mkdir -p "$WORK" || { echo "Can't create $WORK"; exit 1; }
+LOG="$WORK/setup.log"
+STEPS=4
+STEP=0
+T0=$SECONDS
+
+ts() { date '+%H:%M:%S'; }
+elapsed() { local s=$(( SECONDS - T0 )); printf '%d:%02d' $(( s / 60 )) $(( s % 60 )); }
+log() { printf '%s  %s\n' "$(ts)" "$*" >> "$LOG"; }
+step() {
+  STEP=$(( STEP + 1 ))
+  printf '\n\033[1;36m[%d/%d]\033[0m \033[1m%s\033[0m  \033[2m(%s elapsed)\033[0m\n' "$STEP" "$STEPS" "$*" "$(elapsed)"
+  log "== UPLOAD-MY-FILES $STEP/$STEPS: $*"
+}
+ok() { printf '      \033[32m✔\033[0m %s\n' "$*"; log "OK    $*"; }
+info() { printf '        %s\n' "$*"; log "      $*"; }
+warn() { printf '      \033[33m!\033[0m %s\n' "$*"; log "WARN  $*"; }
+die() {
+  printf '\r\033[K\n      \033[31m✘ %s\033[0m\n\n' "$*"
+  printf '      Stopped at step %d of %d after %s. Full log: %s\n' "$STEP" "$STEPS" "$(elapsed)" "$LOG"
+  printf '      Fix the problem above (or just wait a minute), then run %s again; it skips what is already there.\n\n' "$ME"
+  log "FAIL  $*"
+  exit 1
+}
+
+# How to run this script again, as the user would type it
+if [ "$(command -v upload-my-files 2>/dev/null)" ]; then ME="upload-my-files"; else ME="bash $0"; fi
+
+printf '\n\033[1m  Upload your own files to Google Drive\033[0m\n'
+printf '  \033[2mFrom %s to the %s in your Google Drive. Full log: %s\033[0m\n' "$SRC" "$LABEL" "$LOG"
+log "######## upload-my-files started (SRC=$SRC TARGET=$TARGET)"
+
+# ---- 1. project and account ------------------------------------------------------------------------------
+step "Checking your lab project and sign-in"
+PROJECT="${GOOGLE_CLOUD_PROJECT:-$(gcloud config get-value project 2>/dev/null)}"
+if [ -z "$PROJECT" ] || [ "$PROJECT" = "(unset)" ]; then
+  PROJECT="$(gcloud projects list --format='value(projectId)' --filter='projectId:qwiklabs-gcp-*' --limit=1 2>/dev/null)"
+fi
+[ -n "$PROJECT" ] || die "No project found. In the console, pick the lab project at the top, then run $ME again."
+ACCOUNT="$(gcloud config get-value account 2>/dev/null)"
+ok "Project  $PROJECT"
+ok "Account  $ACCOUNT"
+[ -f "$WORK/links.txt" ] || warn "The lab setup hasn't finished in this Cloud Shell yet (no $WORK/links.txt). Run it first if the next step fails."
+
+# ---- 2. Drive access -------------------------------------------------------------------------------------
+step "Checking Google Drive access"
+has_drive_scope() {
+  local t; t="$(gcloud auth print-access-token 2>/dev/null)" || return 1
+  curl -s "https://oauth2.googleapis.com/tokeninfo?access_token=$t" | grep -q 'auth/drive'
+}
+if has_drive_scope; then
+  ok "This sign-in can write to your Google Drive"
+else
+  log "token has no Drive scope"
+  printf '      \033[31m✘ This Cloud Shell sign-in has no Google Drive access yet.\033[0m\n'
+  info "Run the lab setup again; it asks for Drive access once and keeps everything else:"
+  info "  $SETUP_CMD"
+  info "Then run $ME again."
+  log "FAIL  no Drive scope; told the user to re-run the setup"
+  exit 1
+fi
+
+# ---- 3. local files --------------------------------------------------------------------------------------
+step "Looking for your files in $SRC"
+[ $# -eq 0 ] && mkdir -p "$SRC" 2>/dev/null   # the default ~/my-files is made for you; a folder you name must exist
+[ -d "$SRC" ] || die "$SRC is not a folder."
+COUNT="$(find "$SRC" -mindepth 1 -name '.*' -prune -o -type f -print 2>/dev/null | wc -l | tr -d ' ')"
+if [ "$COUNT" -gt 0 ]; then
+  ok "Found $COUNT file$([ "$COUNT" = 1 ] || echo s) ($(du -sh "$SRC" 2>/dev/null | cut -f1))"
+  LOCAL="$SRC"
+else
+  warn "$SRC is empty, so there is nothing to upload yet."
+  LOCAL="-"   # still make sure the Drive folder exists, so you can drag files into it in the browser
+fi
+
+# ---- 4. upload -------------------------------------------------------------------------------------------
+step "Uploading to the $LABEL in your Google Drive"
+INTO=(--into "$TARGET")
+case "$TARGET" in
+  *drive.google.com/*folders/*) FID="${TARGET##*folders/}"; INTO=(--into-id "${FID%%[?/#]*}") ;;
+  id:*) INTO=(--into-id "${TARGET#id:}") ;;
+esac
+cd "$WORK" || die "Can't open $WORK"
 cat > drive_upload_lab.py <<'PY_EOF'
-"""Upload an unzipped demo-data folder into the signed-in user's My Drive (stdlib only; runs in Cloud Shell).
+"""Upload a local folder into the signed-in user's My Drive (stdlib only; runs in Cloud Shell).
 
-  python3 drive_upload_lab.py <folder> [id_file]
+  python3 drive_upload_lab.py <folder> [id_file]                     -> My Drive/<folder's name>/... (demo data)
+  python3 drive_upload_lab.py <folder> [id_file] --into "My Uploads" -> <folder>'s contents go into My Drive/My Uploads
+  python3 drive_upload_lab.py - [id_file] --into "My Uploads"        -> only find or create My Drive/My Uploads
+  --into-id FOLDER_ID targets an existing folder by id instead of a top-level My Drive folder by name.
 
-<folder> is the top folder from the zip (e.g. "Graywing Ag Systems (Demo Data)"); it becomes a folder of the
-same name in My Drive. .xlsx/.docx/.pptx are converted to Sheets/Docs/Slides, PDFs and images stay files.
+.xlsx/.xls/.csv, .docx/.doc and .pptx/.ppt are converted to Sheets/Docs/Slides (if Drive can't convert one, it is
+uploaded as it is); PDFs, images and everything else stay files. Files over MAX_FILE_MB (default 100) are skipped.
 Re-runs reuse folders and skip files that already exist by name, so nothing is duplicated.
 Speed: folders are made level by level (in parallel within a level), then files upload WORKERS at a time;
 new writes start at most every WRITE_GAP seconds to stay inside Drive's per-user write rate.
 Token: $DRIVE_TOKEN if set, else `gcloud auth print-access-token` (refreshed on 401).
 Shows a live progress bar; logs one line per file to $UPLOAD_LOG (if set); writes the root folder id to id_file.
+Exit code 2 when some files could not be uploaded (the others are done; a re-run retries only the missing ones).
 """
+import argparse
+import http.client
 import json
+import mimetypes
 import os
 import subprocess
 import sys
@@ -294,15 +536,21 @@ from datetime import datetime
 API = os.environ.get("DRIVE_API", "https://www.googleapis.com/drive/v3")
 UPLOAD = os.environ.get("DRIVE_UPLOAD_API", "https://www.googleapis.com/upload/drive/v3")
 FOLDER = "application/vnd.google-apps.folder"
-CONVERT = {".xlsx": "application/vnd.google-apps.spreadsheet",
-           ".docx": "application/vnd.google-apps.document",
-           ".pptx": "application/vnd.google-apps.presentation"}
+SHEET, DOC, SLIDES = ("application/vnd.google-apps." + k for k in ("spreadsheet", "document", "presentation"))
+CONVERT = {".xlsx": SHEET, ".xls": SHEET, ".csv": SHEET,
+           ".docx": DOC, ".doc": DOC,
+           ".pptx": SLIDES, ".ppt": SLIDES}
 SOURCE = {".xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
           ".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
           ".pptx": "application/vnd.openxmlformats-officedocument.presentationml.presentation",
-          ".pdf": "application/pdf", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".png": "image/png"}
+          ".xls": "application/vnd.ms-excel", ".doc": "application/msword", ".ppt": "application/vnd.ms-powerpoint",
+          ".csv": "text/csv", ".txt": "text/plain", ".md": "text/markdown", ".pdf": "application/pdf",
+          ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".png": "image/png", ".gif": "image/gif",
+          ".webp": "image/webp", ".heic": "image/heic"}
 WORKERS = int(os.environ.get("UPLOAD_WORKERS", "6"))
 WRITE_GAP = float(os.environ.get("WRITE_GAP", "0.3"))
+MAX_BYTES = int(float(os.environ.get("MAX_FILE_MB", "100")) * 1024 * 1024)
+RESUMABLE_OVER = 5 * 1024 * 1024  # Drive's multipart upload is meant for files up to 5 MB
 
 _token = os.environ.get("DRIVE_TOKEN", "")
 _token_lock = threading.Lock()
@@ -312,6 +560,10 @@ _last_write = 0.0
 # quota project"); a gcloud user login doesn't. Send it when given, drop it if the project refuses it.
 QUOTA_PROJECT = os.environ.get("QUOTA_PROJECT", "")
 _use_quota = bool(QUOTA_PROJECT)
+
+
+class DriveError(Exception):
+    """A request Drive refused or kept failing; fatal for folders, reported per file for uploads."""
 
 
 def token(refresh=False):
@@ -340,7 +592,7 @@ def pace_write():
         _last_write = time.time()
 
 
-def call(method, url, params=None, body=None, headers=None):
+def call(method, url, params=None, body=None, headers=None, want_headers=False):
     global _use_quota
     if params:
         url += "?" + urllib.parse.urlencode(params)
@@ -357,6 +609,8 @@ def call(method, url, params=None, body=None, headers=None):
         try:
             with urllib.request.urlopen(req, timeout=180) as r:
                 raw = r.read()
+                if want_headers:
+                    return r.headers
                 return json.loads(raw) if raw else {}
         except urllib.error.HTTPError as e:
             text = e.read().decode("utf-8", "replace")
@@ -374,10 +628,10 @@ def call(method, url, params=None, body=None, headers=None):
                 continue
             if e.code == 403 and "insufficient" in text.lower():
                 sys.exit("\nDrive said the sign-in has no Drive access. Re-run the setup and approve Google Drive access.")
-            sys.exit(f"\nGoogle Drive refused the request ({e.code}): {api_message(text)}")
-        except urllib.error.URLError:
+            raise DriveError(f"Google Drive refused the request ({e.code}): {api_message(text)}")
+        except (urllib.error.URLError, OSError, http.client.HTTPException):  # network blip, reset, timeout
             time.sleep(min(30, 1.5 * 2 ** attempt))
-    sys.exit(f"\nDrive API kept failing on {method} {url.split('?')[0]}")
+    raise DriveError(f"Drive API kept failing on {method} {url.split('?')[0]}")
 
 
 def q_escape(s):
@@ -409,25 +663,61 @@ def root_folder(name):
     return make_folder("root", name), True
 
 
-def upload(parent, path, name, convert):
+def folder_by_id(fid):
+    try:
+        meta = call("GET", f"{API}/files/{urllib.parse.quote(fid)}", {"fields": "id,name,mimeType,trashed"})
+    except DriveError as e:
+        sys.exit(f"\nCan't open the Drive folder {fid}: {e}")
+    if meta.get("mimeType") != FOLDER or meta.get("trashed"):
+        sys.exit(f"\n{fid} is not a Drive folder (or it is in the trash).")
+    return meta["id"], meta.get("name", fid)
+
+
+def content_type(path):
     ext = os.path.splitext(path)[1].lower()
+    return SOURCE.get(ext) or mimetypes.guess_type(path)[0] or "application/octet-stream"
+
+
+def upload(parent, path, name, convert):
     meta = {"name": name, "parents": [parent]}
     if convert:
         meta["mimeType"] = convert
+    ctype = content_type(path)
     with open(path, "rb") as fh:
         data = fh.read()
+    if len(data) > RESUMABLE_OVER:
+        where = call("POST", f"{UPLOAD}/files", {"uploadType": "resumable", "fields": "id"}, json.dumps(meta).encode(),
+                     {"Content-Type": "application/json; charset=UTF-8", "X-Upload-Content-Type": ctype,
+                      "X-Upload-Content-Length": str(len(data))}, want_headers=True)
+        session = where.get("Location") or where.get("location")
+        if not session:
+            raise DriveError("Drive did not start the upload (no upload address)")
+        call("PUT", session, None, data, {"Content-Type": ctype})
+        return
     b = "gw" + uuid.uuid4().hex
     body = (f"--{b}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n{json.dumps(meta)}\r\n"
-            f"--{b}\r\nContent-Type: {SOURCE.get(ext, 'application/octet-stream')}\r\n\r\n").encode() + data \
-        + f"\r\n--{b}--".encode()
+            f"--{b}\r\nContent-Type: {ctype}\r\n\r\n").encode() + data + f"\r\n--{b}--".encode()
     call("POST", f"{UPLOAD}/files", {"uploadType": "multipart", "fields": "id"}, body,
          {"Content-Type": f"multipart/related; boundary={b}"})
 
 
+def upload_one(fid, full, name, convert):
+    """Upload one file; if Drive can't convert it, upload it unconverted. Returns what it became."""
+    try:
+        upload(fid, full, name, convert)
+        return convert
+    except DriveError as e:
+        if not convert:
+            raise
+        log(f"warn  {os.path.basename(full)}: conversion refused ({e}); uploading it as it is")
+        upload(fid, full, os.path.basename(full), None)
+        return None
+
+
 def plan(local_root, root_id, root_existed, pool):
     """Walk the tree level by level: list existing folders, create missing ones (in parallel within a level).
-    Returns the files still to upload and how many are already in Drive."""
-    tasks, skipped = [], 0
+    Returns the files still to upload, how many are already in Drive, and the files too big to upload."""
+    tasks, skipped, too_big = [], 0, []
     level = [(local_root, root_id, root_existed)]
     while level:
         listings = list(pool.map(lambda x: children(x[1]) if x[2] else [], level))
@@ -445,19 +735,24 @@ def plan(local_root, root_id, root_existed, pool):
                     else:
                         creates.append((full, fid, entry))
                     continue
+                if not os.path.isfile(full):
+                    continue
                 stem, ext = os.path.splitext(entry)
                 convert = CONVERT.get(ext.lower())
                 name = stem if convert else entry
                 rel = os.path.relpath(full, local_root)
-                if name in files:
+                if name in files or entry in files:  # entry: an earlier run uploaded it unconverted
                     skipped += 1
                     log(f"skip  {rel} (already in Drive)")
+                elif os.path.getsize(full) > MAX_BYTES:
+                    too_big.append(rel)
+                    log(f"big   {rel} ({os.path.getsize(full) // 2 ** 20} MB, over {MAX_BYTES // 2 ** 20} MB): not uploaded")
                 else:
                     tasks.append((fid, full, name, convert, rel))
         made = list(pool.map(lambda c: make_folder(c[1], c[2]), creates))
         next_level += [(c[0], new_id, False) for c, new_id in zip(creates, made)]
         level = next_level
-    return tasks, skipped
+    return tasks, skipped, too_big
 
 
 def log(msg):
@@ -471,76 +766,231 @@ def bar(done, total, rel):
     total = total or 1
     width = 24
     fill = width * done // total
-    where = os.path.dirname(rel).split(os.sep)[0] or "top folder"
+    where = os.path.dirname(rel).split(os.sep)[0] or os.path.basename(rel)
     where = (where[:30] + "…") if len(where) > 31 else where
     sys.stdout.write(f"\r\033[K        [{'█' * fill}{'░' * (width - fill)}] {done:3}/{total} files "
                      f"{100 * done // total:3}%  \033[2m{where}\033[0m")
     sys.stdout.flush()
 
 
-def main():
-    local = os.path.abspath(sys.argv[1])
-    id_file = sys.argv[2] if len(sys.argv) > 2 else None
-    name = os.path.basename(local.rstrip("/"))
-    total = sum(1 for _, _, fs in os.walk(local) for f in fs if not f.startswith("."))
+def main(argv=None):
+    ap = argparse.ArgumentParser(description="Upload a local folder into My Drive.")
+    ap.add_argument("folder", help="local folder to upload, or - to only find or create the Drive folder")
+    ap.add_argument("id_file", nargs="?", help="write the Drive folder id here (else print ROOT_FOLDER_ID=...)")
+    ap.add_argument("--into", metavar="NAME", help="top-level My Drive folder to upload into (created if missing)")
+    ap.add_argument("--into-id", metavar="FOLDER_ID", help="existing Drive folder to upload into")
+    args = ap.parse_args(argv)
+    local = None if args.folder == "-" else os.path.abspath(args.folder)
+    if local is None and not (args.into or args.into_id):
+        ap.error("folder '-' needs --into or --into-id")
+    if local is not None and not os.path.isdir(local):
+        ap.error(f"{args.folder} is not a folder")
     t0 = time.time()
-    root_id, created = root_folder(name)
-    print(f"        {'Created' if created else 'Found'} the folder '{name}' in My Drive", flush=True)
-    log(f"root folder {root_id} ({'created' if created else 'reused'})")
-    pool = ThreadPoolExecutor(max_workers=WORKERS)
-    try:
-        tasks, skipped = plan(local, root_id, not created, pool)
-        done = skipped
-        bar(done, total, "")
-        futures = {pool.submit(upload, fid, full, nm, conv): (rel, conv) for fid, full, nm, conv, rel in tasks}
-        for f in as_completed(futures):
-            f.result()  # re-raises a failed upload (SystemExit with the reason)
-            rel, conv = futures[f]
-            done += 1
-            log(f"put   {rel}" + (" -> Google " + conv.split(".")[-1].title() if conv else ""))
-            bar(done, total, rel)
-    except BaseException:
-        pool.shutdown(wait=False, cancel_futures=True)
-        raise
-    pool.shutdown()
-    sys.stdout.write("\n")
-    n = len(tasks)
-    print(f"        Uploaded {n} new file{'' if n == 1 else 's'}"
-          + (f", {skipped} were already there" if skipped else "") + f" ({time.time() - t0:.0f}s)", flush=True)
-    log(f"done: uploaded {n}, skipped {skipped}, {time.time() - t0:.0f}s with {WORKERS} at a time")
-    if id_file:
-        with open(id_file, "w") as fh:
+    if args.into_id:
+        root_id, name = folder_by_id(args.into_id)
+        created = False
+    else:
+        name = args.into or os.path.basename(local.rstrip("/"))
+        try:
+            root_id, created = root_folder(name)
+        except DriveError as e:
+            sys.exit(f"\nCould not open or create '{name}' in My Drive: {e}")
+    print(f"        {'Created' if created else 'Found'} the folder '{name}' in "
+          f"{'your Drive' if args.into_id else 'My Drive'}", flush=True)
+    log(f"root folder {root_id} '{name}' ({'created' if created else 'reused'})")
+    failed, too_big = [], []
+    if local is not None:
+        pool = ThreadPoolExecutor(max_workers=WORKERS)
+        try:
+            try:
+                tasks, skipped, too_big = plan(local, root_id, not created, pool)
+            except DriveError as e:
+                sys.exit(f"\nCould not set up the folders in Drive: {e}")
+            total = skipped + len(tasks)
+            done = skipped
+            bar(done, total, "")
+            futures = {pool.submit(upload_one, fid, full, nm, conv): (rel, conv) for fid, full, nm, conv, rel in tasks}
+            for f in as_completed(futures):
+                rel, conv = futures[f]
+                try:
+                    became = f.result()  # SystemExit (no Drive access) still stops everything
+                    log(f"put   {rel}" + (" -> Google " + became.split(".")[-1].title() if became else ""))
+                except DriveError as e:
+                    failed.append((rel, str(e)))
+                    log(f"FAIL  {rel}: {e}")
+                done += 1
+                bar(done, total, rel)
+        except BaseException:
+            pool.shutdown(wait=False, cancel_futures=True)
+            raise
+        pool.shutdown()
+        sys.stdout.write("\n")
+        n = len(tasks) - len(failed)
+        print(f"        Uploaded {n} new file{'' if n == 1 else 's'}"
+              + (f", {skipped} {'was' if skipped == 1 else 'were'} already there" if skipped else "") + f" ({time.time() - t0:.0f}s)", flush=True)
+        for rel in too_big:
+            print(f"        Skipped {rel}: bigger than {MAX_BYTES // 2 ** 20} MB", flush=True)
+        for rel, why in failed:
+            print(f"        Could not upload {rel}: {why}", flush=True)
+        log(f"done: uploaded {n}, skipped {skipped}, too big {len(too_big)}, failed {len(failed)}, "
+            f"{time.time() - t0:.0f}s with {WORKERS} at a time")
+    if args.id_file:
+        with open(args.id_file, "w") as fh:
             fh.write(root_id)
     else:
         print(f"ROOT_FOLDER_ID={root_id}")
+    if failed:
+        sys.exit(2)
 
 
 if __name__ == "__main__":
     main()
 PY_EOF
-rm -f folder_id.txt
-UPLOAD_LOG="$LOG" QUOTA_PROJECT="$PROJECT" python3 drive_upload_lab.py "$DATA_DIR" folder_id.txt || die "Drive upload stopped (see above and $LOG)."
-FOLDER_ID="$(cat folder_id.txt 2>/dev/null)"
-[ -n "$FOLDER_ID" ] || die "Drive upload did not finish."
-DRIVE_URL="https://drive.google.com/drive/folders/$FOLDER_ID"
-ok "Drive folder: $DRIVE_URL"
-printf 'DEMO_DATA_DRIVE_FOLDER=%s\n' "$DRIVE_URL" >> "$WORK/links.txt"
+rm -f my_uploads_id.txt
+UPLOAD_LOG="$LOG" QUOTA_PROJECT="$PROJECT" python3 drive_upload_lab.py "$LOCAL" my_uploads_id.txt "${INTO[@]}"
+RC=$?
+FOLDER_ID="$(cat my_uploads_id.txt 2>/dev/null)"
+[ -n "$FOLDER_ID" ] || die "The upload stopped before it reached Google Drive (see above and $LOG)."
+FOLDER_URL="https://drive.google.com/drive/folders/$FOLDER_ID"
+{ grep -v '^MY_UPLOADS_FOLDER=' links.txt 2>/dev/null; printf 'MY_UPLOADS_FOLDER=%s\n' "$FOLDER_URL"; } > links.txt.new \
+  && mv links.txt.new links.txt
+if [ "$RC" = 0 ]; then
+  ok "The $LABEL is ready in your Google Drive"
+else
+  warn "Some files could not be uploaded (listed above). Run $ME again to retry just those."
+fi
 
-# ---- 6. done ---------------------------------------------------------------------------------------------
-step "All done"
-log "######## setup finished in $(elapsed): app=$WEB_URL drive=$DRIVE_URL"
+# ---- done ------------------------------------------------------------------------------------------------
+log "######## upload-my-files finished in $(elapsed) (rc=$RC): $FOLDER_URL"
+line="  ════════════════════════════════════════════════════════════════════════"
+printf '\n\033[32m%s\033[0m\n' "$line"
+printf '   \033[1mYOUR UPLOADS FOLDER IN GOOGLE DRIVE\033[0m  (drag more files into it any time)\n'
+printf '   \033[4;36m%s\033[0m\n' "$FOLDER_URL"
+printf '\033[32m%s\033[0m\n\n' "$line"
+if [ "$LOCAL" = "-" ]; then
+  printf '   \033[1mTo upload from Cloud Shell:\033[0m\n'
+  printf '   1. Click the \033[1m⋮\033[0m menu at the top right of this terminal, then \033[1mUpload\033[0m, and pick your files.\n'
+  printf '   2. Set the destination to \033[1m%s\033[0m (if they landed in your home folder: mv ~/FILENAME %s/).\n' "$SRC" "$SRC"
+  printf '   3. Run \033[1m%s\033[0m again.\n\n' "$ME"
+  printf '   \033[2mOr just open the folder link above and drag your files into it.\033[0m\n\n'
+else
+  printf '   Next: in your Chief of Staff agent, add the %s as a Google Drive source,\n' "$LABEL"
+  printf '   or tell it: Also use the files in my %s.\n\n' "$LABEL"
+fi
+printf '   \033[2mLinks saved in %s · full log in %s\033[0m\n\n' "$WORK/links.txt" "$LOG"
+exit "$RC"
+UPLOAD_MY_FILES_EOF
+chmod +x "$HOME/bin/upload-my-files"
+grep -qs 'graywing lab: upload-my-files' "$HOME/.bashrc" \
+  || printf '\n# graywing lab: upload-my-files\nexport PATH="$HOME/bin:$PATH"\n' >> "$HOME/.bashrc"
+ok "Installed: upload-my-files (copies ~/my-files into \"$MY_UPLOADS\" in your Drive)"
+
+# ---- 8. demo data and My Uploads in My Drive -------------------------------------------------------------
+step "Copying the Graywing demo data into your Google Drive"
+cd "$WORK" || die "Can't open $WORK"
+awk '/^PY_EOF$/{p=0} p{print} /<<.PY_EOF.$/{p=1}' "$HOME/bin/upload-my-files" > drive_upload_lab.py
+[ -s drive_upload_lab.py ] || die "Could not set up the Drive uploader."
+rm -f data.zip
+case "$DATA_URL" in
+  gs://*) spin "Downloading the demo data" gcloud storage cp "$DATA_URL" data.zip --quiet ;;
+  *) spin "Downloading the demo data" curl -fsSL "$DATA_URL" -o data.zip ;;
+esac
+[ -s data.zip ] || die "Could not download the demo data from $DATA_URL"
+rm -rf data && mkdir data && unzip -q data.zip -d data || die "The demo data zip is damaged."
+DATA_DIR="$(find data -mindepth 1 -maxdepth 1 -type d | head -1)"
+ok "Downloaded $(find "$DATA_DIR" -type f | wc -l | tr -d ' ') files ($(du -sh data.zip | cut -f1))"
+rm -f folder_id.txt
+UPLOAD_LOG="$LOG" QUOTA_PROJECT="$PROJECT" python3 drive_upload_lab.py "$DATA_DIR" folder_id.txt
+RC=$?
+FOLDER_ID="$(cat folder_id.txt 2>/dev/null)"
+[ -n "$FOLDER_ID" ] || die "Drive upload stopped (see above and $LOG)."
+[ "$RC" = 0 ] || warn "Some files could not be uploaded (listed above). Paste the script again to retry just those."
+DRIVE_URL="https://drive.google.com/drive/folders/$FOLDER_ID"
+ok "Demo data folder: $DRIVE_URL"
+
+INTO=(--into "$MY_UPLOADS")
+case "$MY_UPLOADS" in
+  *drive.google.com/*folders/*) FID="${MY_UPLOADS##*folders/}"; INTO=(--into-id "${FID%%[?/#]*}") ;;
+  id:*) INTO=(--into-id "${MY_UPLOADS#id:}") ;;
+esac
+rm -f my_uploads_id.txt
+UPLOAD_LOG="$LOG" QUOTA_PROJECT="$PROJECT" python3 drive_upload_lab.py - my_uploads_id.txt "${INTO[@]}"
+UPLOADS_ID="$(cat my_uploads_id.txt 2>/dev/null)"
+if [ -n "$UPLOADS_ID" ]; then
+  UPLOADS_URL="https://drive.google.com/drive/folders/$UPLOADS_ID"
+  ok "My Uploads folder: $UPLOADS_URL"
+else
+  UPLOADS_URL=""
+  warn "Could not make the \"$MY_UPLOADS\" folder (see $LOG); upload-my-files makes it later."
+fi
+
+# ---- 9. connectors active, links -------------------------------------------------------------------------
+step "Finishing up"
+connectors_ready() {  # 0 = all active, 1 = still starting, 3 = one failed
+  local cid rc=0
+  for cid in "${CIDS[@]}"; do
+    api GET "$NBASE/collections/$cid/dataConnector"
+    case "$(jv 'd.get("state","")')" in
+      ACTIVE) ;;
+      FAILED|INITIALIZATION_FAILED) return 3 ;;
+      *) rc=1 ;;
+    esac
+    case "$(jv 'd.get("actionState","")')" in CREATING|UPDATING|RUNNING) rc=1 ;; esac
+  done
+  return $rc
+}
+wait_connectors() { for _ in $(seq 150); do connectors_ready; case $? in 0) return 0 ;; 3) return 3 ;; esac; sleep 5; done; return 1; }
+if ! connectors_ready; then
+  spin "Waiting for the new connectors to start (usually about 10 minutes from when they were made)" wait_connectors
+fi
+for c in "${CONNECTORS[@]}"; do
+  IFS='|' read -r _ CID CNAME <<<"$c"
+  api GET "$NBASE/collections/$CID/dataConnector"
+  ST="$(jv 'd.get("state","")')"; AST="$(jv 'd.get("actionState","")')"
+  if [ "$ST" = ACTIVE ]; then
+    ok "$CNAME connector: active$([ "$AST" = ACTIVE ] && echo ', actions active')"
+  elif [ "$ST" = FAILED ] || [ "$ST" = INITIALIZATION_FAILED ]; then
+    warn "$CNAME connector failed: $(jv 'd.get("errors","")'). Delete it under Gemini Enterprise > Data stores and paste the script again."
+  else
+    warn "$CNAME connector is still starting (${ST:-unknown}); it finishes on its own. Authorize it in the app once it shows."
+  fi
+done
+if [ -z "${ATTACHED:-}" ]; then
+  attach
+  if [ -n "$ATTACHED" ]; then ok "$ATTACH_MSG ${APP_TITLE:-$APP_ID}"
+  else warn "Could not add the connectors to the app yet ($CODE): $(err). Paste the script again in a few minutes."; fi
+fi
+{
+  printf 'GEMINI_ENTERPRISE_APP=%s\n' "$WEB_URL"
+  printf 'ADMIN_CONSOLE=%s\n' "$CONSOLE_URL"
+  printf 'DEMO_DATA_DRIVE_FOLDER=%s\n' "$DRIVE_URL"
+  [ -n "$UPLOADS_URL" ] && printf 'MY_UPLOADS_FOLDER=%s\n' "$UPLOADS_URL"
+} > "$WORK/links.txt"
+rm -f "$WORK/.discovery.json"
+log "######## setup finished in $(elapsed): app=$WEB_URL drive=$DRIVE_URL uploads=$UPLOADS_URL"
+
 line="  ════════════════════════════════════════════════════════════════════════"
 printf '\n\033[32m%s\033[0m\n' "$line"
 printf '\033[1;32m   ✔ Setup complete in %s\033[0m\n\n' "$(elapsed)"
-printf '   \033[1mYOUR GEMINI ENTERPRISE APP\033[0m  (open this and bookmark it)\n'
+printf '   \033[1mYOUR GEMINI ENTERPRISE APP\033[0m  (%s · open this and bookmark it)\n' "${APP_TITLE:-$APP_ID}"
 printf '   \033[4;36m%s\033[0m\n\n' "$WEB_URL"
 printf '   \033[1mGRAYWING DEMO DATA IN YOUR GOOGLE DRIVE\033[0m\n'
 printf '   \033[4;36m%s\033[0m\n\n' "$DRIVE_URL"
+if [ -n "$UPLOADS_URL" ]; then
+  printf '   \033[1mMY UPLOADS\033[0m  (your own files: drag them in, or run upload-my-files)\n'
+  printf '   \033[4;36m%s\033[0m\n\n' "$UPLOADS_URL"
+fi
+if [ "${#TURNED_ON[@]}" -gt 0 ]; then
+  printf '   \033[1mTurned on:\033[0m %s\n' "$(printf '%s, ' "${TURNED_ON[@]}" | sed 's/, $//')"
+  printf '   \033[1mConnected:\033[0m Google Drive, Gmail, Google Calendar (search + actions)\n\n'
+fi
 printf '   \033[2mAdmin console: %s\033[0m\n' "$CONSOLE_URL"
 printf '   \033[2mLinks saved in %s · full log in %s\033[0m\n' "$WORK/links.txt" "$LOG"
 printf '\033[32m%s\033[0m\n\n' "$line"
 printf '   \033[1mNext (once):\033[0m\n'
 printf '   1. Open the app link above (signed in as %s).\n' "$ACCOUNT"
-printf '   2. Click \033[1mConnectors\033[0m and \033[1mAuthorize\033[0m next to Google Drive.\n'
+printf '   2. Click \033[1mConnectors\033[0m and \033[1mAuthorize\033[0m Google Drive, Gmail and Google Calendar.\n'
 printf '   3. Ask: "What does Graywing Ag Systems sell, and who are its biggest customers?"\n\n'
+printf '   Your own files: put them in ~/my-files, then run \033[1mupload-my-files\033[0m (new terminal tabs find it;\n'
+printf '   in this one, run  export PATH="$HOME/bin:$PATH"  first).\n'
 printf '   Show the links again any time with:  cat %s\n\n' "$WORK/links.txt"

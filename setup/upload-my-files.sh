@@ -21,7 +21,8 @@ case "$TARGET" in   # a Drive folder link or "id:<folder id>" means that exact f
   *) LABEL="\"$TARGET\" folder" ;;
 esac
 WORK="${WORK:-$HOME/graywing-lab}"
-SETUP_CMD="bash <(curl -fsSL https://raw.githubusercontent.com/tridorian/YPO-Chicagoland/main/setup/graywing-setup.sh)"
+if [ -f "$HOME/graywing-setup.sh" ]; then SETUP_CMD="bash ~/graywing-setup.sh"   # the paste-in setup leaves this file
+else SETUP_CMD="bash <(curl -fsSL https://raw.githubusercontent.com/tridorian/YPO-Chicagoland/main/setup/graywing-setup.sh)"; fi
 # ---------------------------------------------------------------------------------------------------------
 
 mkdir -p "$WORK" || { echo "Can't create $WORK"; exit 1; }
