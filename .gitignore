@@ -1,0 +1,7 @@
+# local work, never committed
+.venv/
+__pycache__/
+*.log
+_scratch/
+.DS_Store
+Thumbs.db
