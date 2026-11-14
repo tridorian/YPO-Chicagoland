@@ -308,9 +308,9 @@ api GET "$ENGINE/widgetConfigs/default_search_widget_config?modelInfoView=ADMIN"
 [ "$CODE" = 200 ] || die "Could not read the app's settings ($CODE): $(err)"
 CONFIG_ID="$(jv 'd["configId"]')"
 MODELS="$(jv '" ".join(m["modelId"] for m in d.get("uiSettings",{}).get("modelConfigInfo",{}).get("resolvedModels",[]) if m.get("modelId") and m.get("adminView",{}).get("adminOverridable"))')"
-set_models() {  # set_models "id id ..." -> merges MODEL_ENABLED for them into the app's modelConfigs
+set_models() {  # set_models "id id ..." [MODEL_ENABLED|MODEL_DISABLED] -> merges that state for them into modelConfigs
   api GET "$ENGINE"
-  local cfg; cfg="$(WANT="$1" jv 'json.dumps({"modelConfigs": dict(d.get("modelConfigs") or {}, **{m: "MODEL_ENABLED" for m in __import__("os").environ["WANT"].split()})})')"
+  local cfg; cfg="$(WANT="$1" STATE="${2:-MODEL_ENABLED}" jv 'json.dumps({"modelConfigs": dict(d.get("modelConfigs") or {}, **{m: __import__("os").environ["STATE"] for m in __import__("os").environ["WANT"].split()})})')"
   [ "$(jv 'json.dumps(d.get("modelConfigs") or {}, sort_keys=True)')" = "$(jv 'json.dumps(d["modelConfigs"], sort_keys=True)' "$cfg")" ] && return 0
   api PATCH "$ENGINE?updateMask=modelConfigs" "$cfg"
   [ "$CODE" = 200 ]
@@ -338,11 +338,20 @@ else
     else
       case "$BODY" in *OVERAGE*) why="it needs pay-as-you-go usage, which this lab's trial doesn't include" ;;
         *) why="$(err)" ;; esac
-      warn "Claude models are switched on but can't answer yet: $why."
-      TURNED_ON[${#TURNED_ON[@]}-1]+=" (Claude needs pay-as-you-go)"
-      info "If your project has billing: console > Gemini Enterprise > Apps > ${APP_TITLE:-$APP_ID} > Configurations >"
+      CLAUDE_ALL="$(printf '%s\n' $ON | grep '^claude' | tr '\n' ' ')"
+      if [ "${KEEP_CLAUDE:-0}" = 1 ]; then
+        warn "Claude models are switched on but can't answer yet: $why. Leaving them on (KEEP_CLAUDE=1)."
+        TURNED_ON[${#TURNED_ON[@]}-1]+=" (Claude needs pay-as-you-go)"
+      elif set_models "$CLAUDE_ALL" MODEL_DISABLED; then
+        # left on, "Auto" model choice can route to Claude and answers stop half-way with CLAUDE_OVERAGE_REQUIRED
+        warn "Claude can't answer here yet ($why), so the Claude models are switched off again; the Gemini models are on."
+        TURNED_ON[${#TURNED_ON[@]}-1]="$(( $(wc -w <<<"$ON") - $(wc -w <<<"$CLAUDE_ALL") )) models (Gemini; Claude off: needs pay-as-you-go)"
+      else
+        warn "Claude can't answer yet ($why) and could not be switched off ($CODE). Pick a Gemini model instead of Auto."
+      fi
+      info "To use Claude, with billing: console > Gemini Enterprise > Apps > ${APP_TITLE:-$APP_ID} > Configurations >"
       info "Feature Management > Enable third-party models > switch Claude on > Go to Usage & spend (turn on pay-as-you-go)"
-      info "> Agree to the terms > Save. The Gemini models work without this."
+      info "> Agree to the terms > Save, then run this setup again."
     fi
   fi
 fi
