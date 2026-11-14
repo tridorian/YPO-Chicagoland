@@ -34,14 +34,14 @@ Your lab project already has a Gemini Enterprise app. The setup connects it to t
    - copies the demo data into your My Drive under **Graywing Ag Systems (Demo Data)**, and makes an empty **My Uploads** folder for your own files
 
    The green box at the end shows your **app link**, your **Drive folder link** and your **My Uploads link**. To see them again later, run `cat ~/graywing-lab/links.txt`.
-4. Open the app link, click **Connectors**, and **Authorize** Google Drive, Gmail and Google Calendar.
+4. Open the app link, click **Connectors**, and **Authorize** Google Drive, Gmail and Google Calendar. Then, in the chat, ask *"List three files in my Drive folder Graywing Ag Systems (Demo Data)"* and click **Authorize** if it asks (step 0 of the starter prompts).
 5. Ask: *"What does Graywing Ag Systems sell, and who are its biggest customers?"*
 
 It's safe to run the script again: it reuses what's already there and never duplicates files. A full log is in `~/graywing-lab/setup.log`.
 
 ## Then
 
-- **Build the Chief of Staff:** follow `agents/STARTER-PROMPTS.md` (Agents > + New agent), and ask its five test questions.
+- **Build the Chief of Staff:** follow `agents/STARTER-PROMPTS.md` (Agents > + Create agent > Chat agent), and ask its five test questions.
 - **Check the answers:** compare them with `agents/ANSWER-KEY.md`. Wording will differ; check the facts.
 - **Make it act:** ask it to draft an email, book a meeting, or turn an answer into a Google Doc or Slides.
 - **Bring your own files:** see `agents/BRING-YOUR-OWN-FILES.md`.

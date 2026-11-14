@@ -60,4 +60,4 @@ Naming the file in your question ("the Q3 forecast in My Uploads") also helps th
 - **Google formats work best.** Agents read Google Sheets tables more reliably than Excel files, and Google Docs more reliably than scanned PDFs.
 - **What works:** PDFs, Google Docs, Sheets and Slides, Word, Excel and PowerPoint files, images (JPG, PNG), and plain text or CSV files. A PDF that is a scan or a photo of a page works less well than one with real text.
 - **Keep files reasonably small.** A few files of a few MB, or up to about 100 pages each, work best. Very large spreadsheets may only be partly read. `upload-my-files` skips anything over 100 MB.
-- **Google Search is off** in the app, so answers come only from the files: yours and Graywing's.
+- **Google Search is on** for outside context, so ask the agent to say which facts came from your files and which from the web.

@@ -33,17 +33,29 @@ Build a Chief of Staff agent for Helen Marsh, CEO of Graywing Ag Systems, a made
 | A memo or brief | creates a **Google Doc** |
 | A deck | creates **Google Slides** |
 | A tracker or table | creates a **Google Sheet** |
-| Market, price or news context | uses **Google Search**, and says which facts came from the web and which from the files |
+| Market, price or news context | uses **Google Search** (turn on web search in the chat box first), and says which facts came from the web and which from the files |
+| An image | can't make one. Ask in the main chat instead, then add the image to your Slides by hand |
+
+### Step 0: connect first
+
+In the main Gemini Enterprise chat (not an agent), ask these one at a time and click **Authorize** whenever it asks:
+
+1. "List three files in my Drive folder Graywing Ag Systems (Demo Data)." (Google Drive)
+2. "How many drafts do I have?" (Gmail)
+3. "What's on my calendar today?" (Google Calendar)
+
+Without this the agent can't see the files or take actions. Don't start building until Drive lists files.
 
 ### Build it
 
-1. In Gemini Enterprise: Agents → + New agent → Chat agent.
+1. In Gemini Enterprise: Agents → + Create agent → Chat agent.
 2. Paste the starter prompt below and send it. The builder drafts the name, description and instructions.
 3. Data: Add data sources & tools → Google Drive. If you can pick a folder, pick Graywing Ag Systems (Demo Data). [VERIFY UI]
 4. Actions: in the same place, add Gmail, Google Calendar, Google Docs, Google Slides and Google Sheets, and allow them when asked. [VERIFY UI] These are for actions only; the starter prompt keeps all facts coming from Drive.
-5. Open Preview and ask the five questions below. For the last two, check your Gmail Drafts, your Calendar and your Drive for what the agent made.
-6. Improve the answers with round 2 below, re-testing after each change.
-7. Keep it as a draft unless your facilitator says to publish.
+5. Model: in the agent's settings, pick a Gemini model (for example the newest Gemini Pro or Flash shown), not Auto. [VERIFY UI] Auto can pick a model that isn't available in the lab and stop mid-answer.
+6. Open Preview and ask the five questions below. For the last two, check your Gmail Drafts, your Calendar and your Drive for what the agent made. The real clock is in November, so the Oct 19 event is in the past: open Calendar to Oct 19, 2026 to see it.
+7. Improve the answers with round 2 below, re-testing after each change.
+8. Keep it as a draft unless your facilitator says to publish.
 
 ## Chief of Staff
 
@@ -52,15 +64,15 @@ Works for: Helen Marsh, CEO · Folder: Graywing Ag Systems (Demo Data), every de
 
 **STARTER PROMPT**
 
-> Create an executive agent called Chief of Staff for Helen Marsh, CEO of Graywing Ag Systems. Assume today is Thursday, Oct 15, 2026. Read facts only from Google Drive, in the folder "Graywing Ag Systems (Demo Data)": the customer success, maintenance, sales, recruiting and finance folders inside it, including each team's email in "Gmail (simulated)" (thread PDFs and the Mailbox Index sheet) and calendars in "Calendar (simulated)". Never search my Gmail or Google Calendar for Graywing facts; they are empty. Use the other tools only to act when I ask: an email becomes a Gmail draft (never send unless I say "send"), a meeting becomes a Google Calendar event, a memo or brief becomes a Google Doc, a deck becomes Google Slides, a tracker or table becomes a Google Sheet; never Word or Excel. Use Google Search only for outside context such as markets, prices or news, and label it as outside context. Answer questions that cross departments: start with the bottom line in two sentences, then one short section per department, then how the departments' issues connect, then three to five next steps, each with an owner. Name the file behind every fact and never add figures the files don't contain.
+> Create an executive agent called Chief of Staff for Helen Marsh, CEO of Graywing Ag Systems. Assume today is Thursday, Oct 15, 2026. Read facts only from Google Drive, in the folder "Graywing Ag Systems (Demo Data)": the customer success, maintenance, sales, recruiting and finance folders inside it, including each team's email in "Gmail (simulated)" (thread PDFs and the Mailbox Index sheet) and calendars in "Calendar (simulated)". Never search my Gmail or Google Calendar for Graywing facts; they are empty. Use the other tools only to act when I ask: an email becomes a Gmail draft (never send unless I say "send"), a meeting becomes a Google Calendar event, a memo or brief becomes a Google Doc, a deck becomes Google Slides, a tracker or table becomes a Google Sheet; never Word or Excel. Use Google Search only for outside context such as markets, prices or news, and label it as outside context. Answer questions that cross departments: start with the bottom line in two sentences, then one short section per department, then how the departments' issues connect, then three to five next steps, each with an owner. Name the file behind every fact and never add figures the files don't contain. If a tool you need is missing or fails, say which one and stop. Never show a link, file, image or number you did not get from a tool or a file.
 
 Try these in Preview:
 
 1. What should I raise at the next leadership meeting?
 2. Where are we over budget, and what are we doing about it?
 3. Which stalled deals and at-risk customers need my attention this week?
-4. Draft an email from me to Bill Strand at Kettleridge Cooperative: I'll join Tuesday's renewal check-in myself, and here's where the Connect fix stands. Save it as a Gmail draft, and put a 30-minute prep block on my calendar for Monday, Oct 19, with no guests.
-5. Put the agenda for Friday's exec staff meeting in a one-page Google Doc, then make a 3-slide Google Slides version.
+4. Draft an email from me to Bill Strand at Kettleridge Cooperative: I'll join the renewal check-in on Tuesday, Oct 20, 2026 myself, and here's where the Connect fix stands. Save it as a Gmail draft, and put a prep block on my calendar for Monday, Oct 19, 2026, 9:00–9:30 am Central, with no guests.
+5. Put the agenda for the exec staff meeting on Friday, Oct 23, 2026 in a one-page Google Doc, then make a 3-slide Google Slides version.
 
 A good first answer connects the Kettleridge renewal risk, September's budget overruns and the open field technician role. A good action leaves a draft in Gmail Drafts (not Sent) and a new Doc and deck in your Drive, and gives you the links.
 
@@ -77,28 +89,55 @@ Add one of these to your agent's instructions, ask the same question again and c
 | End with a next step | End every answer with one recommended next step: who should do what, and by when if the files give a date. | Is it something a person could act on today? |
 | Put your own rule in | Use this rule: [write your business rule with a number, for example "treat any customer renewing within 60 days with a health score of 55 or more as a CEO issue" or "flag any deal over $1,000,000 with no activity in 14 days"]. | Ask again. Does the answer follow your rule instead of the old one? |
 
-## Round 3, if you have time
+## Round 3: feature tour
 
-Google Search, image generation, Canvas and the model picker are turned on in the app for this lab. If one of them doesn't show inside your agent's Preview, try it in the main chat. [VERIFY UI]
+One prompt each. **Where** says where to paste it; **Check** says what to look for. Dates are written out in full because the real clock (November) and the data's "today" (Oct 15, 2026) differ. Right answers are in the answer key.
 
-1. **Outside context.** Ask: "What outside factors this fall bear on our steel surcharge and our harvest service load? Use Google Search for the market and the files for Graywing, and label which is which." Check that every Graywing number still comes from the files.
-2. **A picture for the deck.** Ask for an image for the title slide of your exec staff deck: "a tower grain dryer at harvest dusk, no text or logos". Then put it on the first slide (from the chat if it offers that, otherwise download it and insert it in Slides). [VERIFY UI]
-3. **Canvas.** Open Canvas [VERIFY UI] and ask for a one-page board memo on the Kettleridge renewal risk. Edit it there: shorter, plainer, a clear ask at the end. Then export it to Google Docs. [VERIFY UI]
-4. **Compare models.** Pick a different model in the model picker [VERIFY UI] and ask question 1 again. Compare speed, length and accuracy against the answer key.
-5. **Bring your own file.** Upload one of your own files to the My Uploads folder in your Drive (see the upload guide; use nothing confidential). Add My Uploads to the agent's Drive source [VERIFY UI] and add this line to its instructions: "Also read the folder My Uploads, and mark facts from it as (my upload)." Then ask: "Summarize my file in My Uploads in five bullets, then tell me which Graywing issue it most resembles and why."
-6. **Swap Graywing for your business.** Rewrite the starter prompt for your own chief of staff: your folders, your meetings, the one cross-team question you wish you could answer on Monday morning.
+1. **Draft an email, then send one to yourself.** Where: your Chief of Staff agent.
+   "Draft a short email from me to Bill Strand at Kettleridge Cooperative confirming I'll join the renewal check-in on Tuesday, Oct 20, 2026. Save it as a Gmail draft; don't send it."
+   Then: "Email me the three biggest risks across Graywing this week, one line each with the file behind it, and send it to me."
+   Check: the first is in Gmail → Drafts, not Sent; the second is in your Inbox. Send only to your own lab address.
+2. **Book a meeting.** Where: your agent.
+   "Put a Cinder Creek pricing review prep on my calendar for Monday, Oct 19, 2026, 2:00–2:30 pm Central, with no guests."
+   Check: in Google Calendar on Oct 19, 2026, at exactly that time, with no guests.
+3. **Make a Google Sheet.** Where: your agent.
+   "Make a Google Sheet of September's over-budget lines: the line, the amount over budget, one-time or recurring, and the file behind it."
+   Check: it's in your Drive and the five lines and amounts match the files. (A Doc and Slides: that's question 5.)
+4. **Canvas: board memo.** Where: Canvas, opened from the chat box. [VERIFY UI]
+   "Draft a one-page board memo on the Kettleridge renewal risk, using only facts from the Graywing files. End with a clear ask."
+   Then edit one paragraph there (shorter, plainer) and export or copy it to Google Docs. [VERIFY UI]
+   Check: every figure is in the files; only your paragraph changed; it lands in your Drive as a Doc.
+5. **Canvas: a mini web page.** Where: Canvas. First copy the over-budget table your agent gave you (question 2 or exercise 3).
+   "Build a one-page web dashboard of September's five over-budget lines, using only the figures from the files. Use only these numbers: [paste the table]."
+   Check: every number against the answer key. Without the table, the builder makes numbers up.
+6. **An image for the deck.** Where: the main chat, not your agent (the agent can't make images and may invent a link).
+   "Make an image for a title slide: a tower grain dryer at harvest dusk, no text or logos."
+   Check: a real image shows in the chat. Download it and add it to the first slide of your exec staff deck by hand.
+7. **Outside context.** Where: your agent, with web search turned on in the chat box (the toggle near the prompt). [VERIFY UI]
+   "How are corn and other commodity prices moving this fall, and what could that mean for our dealers? Use Google Search for the market and label it as outside context; use the files for anything about Graywing."
+   Check: web facts are labelled outside context with sources; no Graywing number comes from the web.
+8. **Compare models.** Where: your agent. Pick a different Gemini model in its settings [VERIFY UI] and ask question 1 again.
+   "What should I raise at the next leadership meeting?"
+   Check: speed, length, and which one still has the facts in the answer key.
+9. **Your own file.** Where: your agent. Upload a file to My Uploads ([BRING-YOUR-OWN-FILES.md](BRING-YOUR-OWN-FILES.md); nothing confidential), add My Uploads to the agent's Drive source [VERIFY UI], and add to its instructions: "Also read the folder My Uploads, and mark facts from it as (my upload)."
+   "Summarize my file in My Uploads in five bullets, then tell me which Graywing issue it most resembles and why."
+   Check: each bullet is really in your file and marked (my upload).
+
+Last: **Swap Graywing for your business.** Rewrite the starter prompt for your own chief of staff: your folders, your meetings, the one cross-team question you wish you could answer on Monday morning.
 
 ## Go faster: add subagents
 
 Chief of Staff can do everything on its own. Subagents make it faster and sharper: each one knows one department's folder well, and Chief of Staff asks the right ones in parallel and puts their answers together. Subagents only read; Chief of Staff does the actions.
 
+Subagents live inside your Chief of Staff agent. You don't build them as separate agents.
+
 **How:**
 
-1. Create each subagent the same way as Chief of Staff (+ New agent), paste its prompt, and add Google Drive pointed at its one folder. No Gmail, Calendar or other tools.
-2. Ask it its test question in Preview.
-3. Open Chief of Staff and add the five as its subagents. [VERIFY UI]
+1. Open Chief of Staff in the agent builder and go to the **Flow** tab.
+2. Hover the Chief of Staff node and click **Add subagent**. [VERIFY UI]
+3. Give each subagent its own instructions (paste its prompt below) and its one Drive folder. No Gmail, Calendar or other tools. Repeat for all five.
 4. Add this line to Chief of Staff's instructions: "For department facts, ask the matching subagents first, all in the same step, then combine their answers and name which subagent each fact came from."
-5. Ask Chief of Staff: **"What is the Connect 5.2.0 problem costing us, and when does it stop?"** It should ask Churn Radar, Budget Watch and Talent Scout together and come back with one cause and one end date.
+5. In Preview, ask Chief of Staff each subagent's test question, then: **"What is the Connect 5.2.0 problem costing us, and when does it stop?"** It should ask Churn Radar, Budget Watch and Talent Scout together and come back with one cause and one end date.
 
 *CUSTOMER SUCCESS*
 
