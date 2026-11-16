@@ -217,10 +217,15 @@ action_setup() {  # action_setup URL -> makes sure the connector has the OAuth a
   if [ "$SRC_NAME" = google_drive ] && [ "$(jv 'len((d.get("bapConfig") or {}).get("enabledActions",[]))')" = 0 ]; then need=1; mask="actionConfig,bapConfig"; fi
   [ -n "$need" ] || return 0
   api PATCH "$1?updateMask=$mask" "{\"actionConfig\":$ACTION_CONFIG,\"bapConfig\":{\"supportedConnectorModes\":[\"ACTIONS\"]$([ "$SRC_NAME" = google_drive ] && printf ',"enabledActions":%s' "$DRIVE_ACTIONS")}}"
-  if [ "$CODE" = 200 ]; then log "action setup applied to $1"; else warn "Could not finish the $CNAME action setup ($CODE): $(err)"; fi
+  if [ "$CODE" = 200 ]; then log "action setup applied to $1"; ACTION_PATCHED=1
+  elif [ "${DEFER_OK:-0}" = 1 ] && [[ "$(err)" == *INITIALIZING* ]]; then
+    # a just-made connector can't be changed until it has started: finish this at the end (step 9)
+    log "action setup for $1 deferred: $(err)"; DEFERRED+=("$SRC_NAME|$1|$CNAME")
+    info "$CNAME is still starting; its action setup is finished at the end of the setup."
+  else warn "Could not finish the $CNAME action setup ($CODE): $(err). Paste the script again in a few minutes."; fi
   api GET "$1"
 }
-CIDS=(); DS_IDS=(); NO_ACTIONS=(); CHOSEN=()
+CIDS=(); DS_IDS=(); NO_ACTIONS=(); CHOSEN=(); DEFERRED=(); DEFER_OK=1
 for c in "${CONNECTORS[@]}"; do
   IFS='|' read -r SRC_NAME BASE_CID CNAME <<<"$c"
   # A connector that failed to start can't be fixed, and a deleted one's id stays locked for hours: use the
@@ -1201,6 +1206,19 @@ connectors_ready() {  # 0 = all active, 1 = still starting, 3 = one failed
 wait_connectors() { for _ in $(seq 150); do connectors_ready; case $? in 0) return 0 ;; 3) return 3 ;; esac; sleep 5; done; return 1; }
 if ! connectors_ready; then
   spin "Waiting for the new connectors to start (usually about 10 minutes from when they were made)" wait_connectors
+fi
+# Action setups that had to wait for their connector to start (Authorize answers "not ready" without them).
+if [ "${#DEFERRED[@]}" -gt 0 ]; then
+  DEFER_OK=0; ACTION_PATCHED=0
+  for c in "${DEFERRED[@]}"; do
+    IFS='|' read -r SRC_NAME url CNAME <<<"$c"
+    action_setup "$url"
+    [ "$CODE" = 200 ] && [ -n "$(jv '(d.get("actionConfig") or {}).get("actionParams",{}).get("auth_type","")')" ] \
+      && ok "$CNAME action setup finished"
+  done
+  if [ "$ACTION_PATCHED" = 1 ] && ! connectors_ready; then
+    spin "Waiting for the connector actions to update" wait_connectors
+  fi
 fi
 for c in "${CONNECTORS[@]}"; do
   IFS='|' read -r _ CID CNAME <<<"$c"
