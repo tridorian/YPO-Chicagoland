@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# upload-my-files - copy your own files from Cloud Shell into the "My Uploads" folder in your Google Drive,
-# so your Gemini Enterprise agents can use them next to the Graywing demo data.
+# upload-my-files - copy your own files from Cloud Shell into the "My Uploads" folder in your Google Drive and
+# into the lab's "My uploads" data store, so your Gemini Enterprise agents can use them next to the Graywing data.
 #
 #   upload-my-files              uploads everything in ~/my-files (subfolders are kept)
 #   upload-my-files <folder>     uploads everything in <folder> instead
@@ -27,7 +27,7 @@ else SETUP_CMD="bash <(curl -fsSL https://raw.githubusercontent.com/tridorian/YP
 
 mkdir -p "$WORK" || { echo "Can't create $WORK"; exit 1; }
 LOG="$WORK/setup.log"
-STEPS=4
+STEPS=5
 STEP=0
 T0=$SECONDS
 
@@ -468,11 +468,66 @@ else
   warn "Some files could not be uploaded (listed above). Run $ME again to retry just those."
 fi
 
+# ---- 5. the My uploads data store (what your agent searches) -----------------------------------------------
+# The Drive copy is for you to open; agents in the lab read the Google-hosted "My uploads" data store that the lab
+# setup made. Supported there: PDF, Word, PowerPoint, Excel, HTML and text files.
+step "Adding your files to the My uploads data store"
+STORE="${UPLOADS_STORE:-graywing-uploads}"
+DS_URL="https://discoveryengine.googleapis.com/v1alpha/projects/$PROJECT/locations/global/collections/default_collection/dataStores/$STORE"
+TOK="$(gcloud auth print-access-token 2>/dev/null)"
+GCODE=""; GBODY=""
+gapi() {  # gapi METHOD URL [JSON] -> $GCODE = HTTP status, $GBODY = body (call it directly, not inside $( ))
+  local out; out="$(mktemp)"
+  GCODE="$(curl -s -o "$out" -w '%{http_code}' -X "$1" -H "Authorization: Bearer $TOK" -H "X-Goog-User-Project: $PROJECT" \
+    -H "Content-Type: application/json" --max-time 120 ${3:+--data "$3"} "$2")"
+  GBODY="$(cat "$out")"; log "API   $1 ${2#https://} -> $GCODE"; rm -f "$out"
+}
+if [ "$LOCAL" = "-" ]; then
+  info "Nothing to add yet."
+elif gapi GET "$DS_URL"; [ "$GCODE" != 200 ]; then
+  warn "No \"My uploads\" data store in this project (the lab setup makes it). Your files are in Drive only."
+else
+  BUCKET="gs://$PROJECT-graywing-data"
+  gcloud storage buckets describe "$BUCKET" >/dev/null 2>&1 \
+    || gcloud storage buckets create "$BUCKET" --location=us --uniform-bucket-level-access >>"$LOG" 2>&1 \
+    || die "Could not create the bucket $BUCKET (see $LOG)."
+  STAGE="$(mktemp -d)"
+  find "$LOCAL" -mindepth 1 -name '.*' -prune -o -type f \( -iname '*.pdf' -o -iname '*.docx' -o -iname '*.pptx' \
+    -o -iname '*.xlsx' -o -iname '*.html' -o -iname '*.htm' -o -iname '*.txt' \) -print | while IFS= read -r f; do
+    r="${f#"$LOCAL"/}"; cp "$f" "$STAGE/${r//\// - }"
+  done
+  N="$(find "$STAGE" -type f | wc -l | tr -d ' ')"
+  SKIPPED=$(( COUNT - N ))
+  if [ "$N" = 0 ]; then
+    warn "None of your files are a type the data store can read (PDF, Word, PowerPoint, Excel, HTML, text)."
+  else
+    gcloud storage cp "$STAGE"/* "$BUCKET/uploads/" --quiet >>"$LOG" 2>&1 || die "Could not copy your files to $BUCKET (see $LOG)."
+    gapi POST "$DS_URL/branches/default_branch/documents:import" \
+      "{\"gcsSource\":{\"inputUris\":[\"$BUCKET/uploads/*\"],\"dataSchema\":\"content\"},\"reconciliationMode\":\"INCREMENTAL\"}"
+    BODY="$GBODY"
+    [ "$GCODE" = 200 ] || die "Could not start adding your files to the data store ($GCODE): $(printf '%s' "$BODY" | python3 -c 'import json,sys; print(json.load(sys.stdin)["error"]["message"])' 2>/dev/null)"
+    OP="$(printf '%s' "$BODY" | python3 -c 'import json,sys; print(json.load(sys.stdin)["name"])')"
+    DONE=""
+    for _ in $(seq 60); do
+      gapi GET "https://discoveryengine.googleapis.com/v1alpha/$OP"; BODY="$GBODY"
+      DONE="$(printf '%s' "$BODY" | python3 -c 'import json,sys; d=json.load(sys.stdin); print("1" if d.get("done") else "")' 2>/dev/null)"
+      [ -n "$DONE" ] && break; sleep 5
+    done
+    if [ -n "$DONE" ]; then
+      ok "Added to the My uploads data store: $(printf '%s' "$BODY" | python3 -c 'import json,sys; print(json.load(sys.stdin).get("metadata",{}).get("successCount","?"))') of $N file(s). Give it a few minutes to be searchable."
+    else
+      warn "Your files are still being added to the data store; they become searchable within a few minutes."
+    fi
+  fi
+  [ "$SKIPPED" -gt 0 ] && info "$SKIPPED file(s) skipped for the data store (not PDF, Word, PowerPoint, Excel, HTML or text); they are in Drive."
+  rm -rf "$STAGE"
+fi
+
 # ---- done ------------------------------------------------------------------------------------------------
 log "######## upload-my-files finished in $(elapsed) (rc=$RC): $FOLDER_URL"
 line="  ════════════════════════════════════════════════════════════════════════"
 printf '\n\033[32m%s\033[0m\n' "$line"
-printf '   \033[1mYOUR UPLOADS FOLDER IN GOOGLE DRIVE\033[0m  (drag more files into it any time)\n'
+printf '   \033[1mYOUR UPLOADS FOLDER IN GOOGLE DRIVE\033[0m  (a copy to open; your agent reads the My uploads data store)\n'
 printf '   \033[4;36m%s\033[0m\n' "$FOLDER_URL"
 printf '\033[32m%s\033[0m\n\n' "$line"
 if [ "$LOCAL" = "-" ]; then
@@ -480,10 +535,10 @@ if [ "$LOCAL" = "-" ]; then
   printf '   1. Click the \033[1m⋮\033[0m menu at the top right of this terminal, then \033[1mUpload\033[0m, and pick your files.\n'
   printf '   2. Set the destination to \033[1m%s\033[0m (if they landed in your home folder: mv ~/FILENAME %s/).\n' "$SRC" "$SRC"
   printf '   3. Run \033[1m%s\033[0m again.\n\n' "$ME"
-  printf '   \033[2mOr just open the folder link above and drag your files into it.\033[0m\n\n'
+  printf '   \033[2mFor a one-off question you can also attach a file straight in the chat.\033[0m\n\n'
 else
-  printf '   Next: in your Chief of Staff agent, add the %s as a Google Drive source,\n' "$LABEL"
-  printf '   or tell it: Also use the files in my %s.\n\n' "$LABEL"
+  printf '   Next: in your Chief of Staff agent, add the \033[1mMy uploads\033[0m data store as a data source,\n'
+  printf '   then tell it: Also use the files in My uploads.\n\n'
 fi
 printf '   \033[2mLinks saved in %s · full log in %s\033[0m\n\n' "$WORK/links.txt" "$LOG"
 exit "$RC"

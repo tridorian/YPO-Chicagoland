@@ -18,7 +18,7 @@ Graywing Ag Systems and everyone in its files are fictional.
 | CS-4 | Write an email from me to Bill Strand… then write a calendar invite for a prep block on Monday, Oct 19, 2026, 9:00–9:30 am Central, with no guests. | writes an **email** in the chat with To: bill.strand@kettleridgecoop.com, a Subject and a body from Helen: she'll join the renewal check-in Tue Oct 20; the cause is a firmware 5.2.0 defect on the Connect Gateway G2; 9 of their gateways rolled back to 5.1.4 and stable; Ellis Terminal (Sev-1 GWS-48391) needs a technician on site; the fix, 5.2.1, is targeted for Oct 20. Then an **invite**: a prep title, Mon Oct 19, 2026, 9:00–9:30 am Central, no guests, a short agenda. Both ready to copy. | says it sent the email or saved a draft or event; offers a credit, discount or contract terms; calls 5.2.1 released or guaranteed; adds guests; puts the invite on a November date, at another time or with no time zone; says it searched Helen's Gmail. |
 | CS-5 | Write a one-page agenda for the exec staff meeting on Friday, Oct 23, 2026, then a 3-slide outline of it. | writes an **agenda** for exec staff Fri Oct 23: bottom line; a short section per department (Kettleridge 85, $302,000, Nov 25; September $216,904 over, steel +$144,073 recurring; six stalled deals, $6,182,000, led by Cinder Creek; REQ-1043 and REQ-1047 open); how it connects; next steps with owners. Then **3 slides**, each a title and bullets, carrying the same figures. In the chat or in Canvas. | says it created a Doc, deck or file, or shows a link to one; agenda and slides disagree; adds a forecast; more than one page or more than 3 slides. |
 
-The agent can't send, save or create anything, so a good answer gives no links to new files, drafts or events. If a tool is missing or fails, the agent should say which one and stop, not show a made-up link, file or image.
+The agent can't send, save or create anything, so a good answer gives no links to new files, drafts or events. If a tool is missing or fails, the agent should say which one and stop, not show a made-up link, file or image. If it says it can't find the files, check that the agent's data source is **Graywing demo data**.
 
 ---
 
@@ -34,7 +34,7 @@ The agent can't send, save or create anything, so a good answer gives no links t
 | 6 | Image for the deck | Main chat, then Slides | A real image in the main chat; if you pasted CS-5's slides into Google Slides, added to slide 1 by hand. | the agent shows an image link or says it added the image to the deck. |
 | 7 | Outside context | Your agent, web search on | Web facts labelled outside context, with sources; Graywing facts from the files. | no label; a Graywing figure from the web; "search unavailable" (web search is off in the chat box). |
 | 8 | Compare models | Your agent | Both models give CS-1's facts; they differ in speed and length. | one drops facts or adds figures; an error mid-answer (the model is not in the free trial: run the setup again, pick another model). |
-| 9 | Your own file | Your agent | Five bullets from your file, each marked (my upload). | facts not in your file; Graywing facts marked as yours. |
+| 9 | Your own file | Your agent | Five bullets from your file, each marked (my upload). | facts not in your file; Graywing facts marked as yours; says it can't find your file (wait a few minutes after `upload-my-files`, and check **My uploads** is one of the agent's data sources). |
 
 ---
 

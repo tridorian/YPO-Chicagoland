@@ -177,22 +177,24 @@ else
   info "No Gemini Enterprise app in this project yet; one called \"$APP_NAME\" is made in the next step."
 fi
 
-# ---- 4. connectors ---------------------------------------------------------------------------------------
-# Default: Google Drive only (each person's own Drive is searched live; nothing is copied). People authorize it
-# once in the app. Gmail and Google Calendar are opt-in: WITH_ACTIONS=1. Google Drive is created in search +
-# actions mode: search-only Drive connectors now fail to start ("pipeline failure"), search + actions start fine.
-# The lab's ready-made app must keep at least two data stores linked, so in Drive-only mode an empty helper data
-# store ($CONNECTOR_PREFIX-notes, no sign-in needed) is linked as well.
+# ---- 4. data stores (default) or connectors (WITH_ACTIONS=1) ----------------------------------------------
+# Default: no connectors. In the Qwiklabs lab people can't authorize connectors ("Data connector is not ready
+# yet"), and a no-code agent can't read Drive without that. So the demo data goes into a Google-hosted data store
+# in this project (step 8), which every user of the app can search with no sign-in step, plus an empty
+# "My uploads" store for people's own files (upload-my-files). The lab's ready-made app must keep at least two
+# data stores linked, which these two are. WITH_ACTIONS=1 instead connects Google Drive, Gmail and Google
+# Calendar with actions (each person must then click Authorize in the app).
 MODES='["FEDERATED","ACTIONS"]'
+DATA_STORE="$CONNECTOR_PREFIX-data"; UPLOADS_STORE="$CONNECTOR_PREFIX-uploads"
 if [ "${WITH_ACTIONS:-0}" = 1 ]; then
   step "Connecting Google Drive, Gmail and Google Calendar"
   CONNECTORS=("google_drive|$CONNECTOR_PREFIX-drive|Google Drive" "google_mail|$CONNECTOR_PREFIX-gmail|Gmail"
               "google_calendar|$CONNECTOR_PREFIX-calendar|Google Calendar")
   CONNECTED="Google Drive, Gmail, Google Calendar (search + actions)"; CONNECTED_NAMES="Google Drive, Gmail and Google Calendar"
 else
-  step "Connecting Google Drive"
-  CONNECTORS=("google_drive|$CONNECTOR_PREFIX-drive|Google Drive")
-  CONNECTED="Google Drive"; CONNECTED_NAMES="Google Drive"
+  step "Creating the Graywing data stores"
+  CONNECTORS=()
+  CONNECTED="data stores Graywing demo data and My uploads (no sign-in needed)"; CONNECTED_NAMES=""
 fi
 body() {  # body MODES_JSON -> setUpDataConnector request for $SRC_NAME / $CID / $CNAME
   printf '{"collectionId":"%s","collectionDisplayName":"%s","dataConnector":{"dataSource":"%s","refreshInterval":"0s","connectorModes":%s,"entities":[{"entityName":"%s"}],"params":{}}}' \
@@ -241,15 +243,23 @@ for c in "${CONNECTORS[@]}"; do
   DS_IDS+=("$DS")
 done
 CONNECTORS=("${CHOSEN[@]}")
-if [ "${WITH_ACTIONS:-0}" != 1 ]; then
-  NOTES_ID="$CONNECTOR_PREFIX-notes"
-  api GET "$BASE/collections/default_collection/dataStores/$NOTES_ID"
+make_store() {  # make_store ID "Display name" -> adds ID to DS_IDS (an unstructured, Google-hosted data store)
+  api GET "$BASE/collections/default_collection/dataStores/$1"
   if [ "$CODE" = 404 ]; then
-    api POST "$BASE/collections/default_collection/dataStores?dataStoreId=$NOTES_ID" \
-      '{"displayName":"Graywing lab notes","industryVertical":"GENERIC","solutionTypes":["SOLUTION_TYPE_SEARCH"],"contentConfig":"CONTENT_REQUIRED"}'
+    api POST "$BASE/collections/default_collection/dataStores?dataStoreId=$1" \
+      "{\"displayName\":\"$2\",\"industryVertical\":\"GENERIC\",\"solutionTypes\":[\"SOLUTION_TYPE_SEARCH\"],\"contentConfig\":\"CONTENT_REQUIRED\"}"
+    [ "$CODE" = 200 ] || die "Could not create the $2 data store ($CODE): $(err)"
+    ok "Data store created: $2"
+  elif [ "$CODE" = 200 ]; then
+    ok "Data store: $2"
+  else
+    die "Could not read the $2 data store ($CODE): $(err)"
   fi
-  if [ "$CODE" = 200 ]; then DS_IDS+=("$NOTES_ID")
-  else warn "Could not make the helper data store ($CODE): $(err)"; fi
+  DS_IDS+=("$1")
+}
+if [ "${WITH_ACTIONS:-0}" != 1 ]; then
+  make_store "$DATA_STORE" "Graywing demo data"
+  make_store "$UPLOADS_STORE" "My uploads"
 fi
 DS_JSON="$(printf '%s\n' "${DS_IDS[@]}" | python3 -c 'import json,sys; print(json.dumps(sys.stdin.read().split()))')"
 for n in "${NO_ACTIONS[@]}"; do
@@ -271,19 +281,15 @@ attach() {  # adds the connectors' data stores to the app, keeping anything alre
     ATTACH_MSG="Connectors added to"; have="$ids"
   fi
   ATTACHED=1
-  # Drive only: take off the Gmail / Calendar connectors an earlier run of this setup added (people can't
-  # authorize them in the lab). An app that has several data stores must keep at least two, so this can fail.
+  # Data-store mode: take off connectors / helper stores an earlier run of this setup linked (ids starting with
+  # the prefix that aren't today's two stores). The app keeps at least two data stores, which today's two are.
   if [ "${WITH_ACTIONS:-0}" != 1 ]; then
-    local extra keep
-    extra="$(P="$CONNECTOR_PREFIX" jv "' '.join(x for x in json.loads('$have') if x.startswith((__import__('os').environ['P'] + '-gmail_', __import__('os').environ['P'] + '-calendar_')))" '{}')"
-    if [ -n "$extra" ]; then
-      keep="$(P="$CONNECTOR_PREFIX" jv "json.dumps([x for x in json.loads('$have') if not x.startswith((__import__('os').environ['P'] + '-gmail_', __import__('os').environ['P'] + '-calendar_'))])" '{}')"
+    local keep
+    keep="$(P="$CONNECTOR_PREFIX-" jv "json.dumps([x for x in json.loads('$have') if not x.startswith(__import__('os').environ['P']) or x in $DS_JSON])" '{}')"
+    if [ -n "$keep" ] && [ "$keep" != "$have" ]; then
       api PATCH "$ENGINE?updateMask=dataStoreIds" "{\"dataStoreIds\":$keep}"
-      if [ "$CODE" = 200 ]; then info "Took the Gmail and Google Calendar connectors off the app (Google Drive is all you need)."
-      else
-        info "Gmail and Google Calendar stay listed under Connectors (the app can't drop them: $(err))."
-        info "You don't need to authorize them; the agent reads the simulated email and calendars from Drive."
-      fi
+      if [ "$CODE" = 200 ]; then info "Took this setup's older connectors off the app; the data stores replace them."
+      else info "Could not take the older connectors off the app ($(err)); you can ignore them."; fi
     fi
   fi
 }
@@ -301,14 +307,14 @@ if [ -n "$NEW_APP" ]; then
   if [ "$(jv 'd.get("done", False)')" != "True" ]; then
     spin "Creating the app" wait_op "$OP" || die "App creation did not finish (see $LOG)."
   fi
-  ok "App created: $APP_NAME ($CONNECTED_NAMES connected)"
+  ok "App created: $APP_NAME ($CONNECTED)"
   ATTACHED=1
 else
   attach
   if [ -n "$ATTACHED" ]; then
     ok "$ATTACH_MSG ${APP_TITLE:-$APP_ID}"
   else
-    info "The app doesn't take the new connectors yet; trying again once they are active (last step)."
+    info "The app doesn't take the new data sources yet ($(err)); trying again at the end."
   fi
 fi
 if [ "${WITH_ACTIONS:-0}" = 1 ] && [ "${#NO_ACTIONS[@]}" = 0 ]; then
@@ -395,30 +401,55 @@ else
   #       a one-word question and switch off the ones that say they are not available here.
   info "Asking each of the $(wc -w <<<"$ON" | tr -d ' ') models a one-word test question to see which ones this lab can use..."
   WORKS=(); BROKEN=(); NOTES=(); UNSURE=(); NEED_PAYG=0; NEED_PAID=0
-  for m in $ON; do
+  judge() {  # judge MODEL -> verdict = works | broken (with $short) | disabled | "" (unsure)
+    local m="$1" try
     verdict=""
     for try in 1 2 3; do
-      if model_answers "$m"; then verdict=works; break; fi
-      # "Model X is disabled." right after switching it on: the change hasn't reached the chat yet, so wait
-      case "$why" in *"is disabled"*) if [ "$try" -lt 3 ]; then sleep 10; continue; fi ;; esac
+      if model_answers "$m"; then verdict=works; return; fi
+      # "Model X is disabled." = just switched on and the change hasn't reached the chat yet: recheck later
+      case "$why" in *"is disabled"*) verdict=disabled; return ;; esac
       case "$why $BODY" in
-        *"free trial"*) verdict=broken; short="not in the free trial"; NEED_PAID=1; break ;;
-        *OVERAGE*|*overage*|*"pay-as-you-go"*) verdict=broken; short="needs pay-as-you-go"; NEED_PAYG=1; break ;;
-        *FAILED_PRECONDITION*|*"not available"*|*"not supported"*|*PERMISSION_DENIED*|*"is disabled"*) verdict=broken ;;
+        *"free trial"*) verdict=broken; short="not in the free trial"; NEED_PAID=1; return ;;
+        *OVERAGE*|*overage*|*"pay-as-you-go"*) verdict=broken; short="needs pay-as-you-go"; NEED_PAYG=1; return ;;
+        *FAILED_PRECONDITION*|*"not available"*|*"not supported"*|*PERMISSION_DENIED*) verdict=broken ;;
       esac
       case "$CODE" in 400|403|404) verdict=broken ;; esac
       if [ "$verdict" = broken ]; then
         if [[ "$m" == claude* ]]; then short="needs pay-as-you-go"; NEED_PAYG=1; else short="${why:0:90}"; fi
-        break
+        return
       fi
       [ "$try" -lt 3 ] && sleep 5   # 429, 5xx or a time-out: maybe a blip, so ask again before judging
     done
+  }
+  place() {  # place MODEL -> files the model under WORKS / BROKEN / UNSURE from $verdict
+    local m="$1"
     if [ "$verdict" = works ]; then WORKS+=("$m")
     elif [ "$verdict" = broken ] && [ "${KEEP_CLAUDE:-0}" = 1 ] && [[ "$m" == claude* ]]; then
       WORKS+=("$m"); warn "$m can't answer yet ($short); leaving it on (KEEP_CLAUDE=1)."
     elif [ "$verdict" = broken ]; then BROKEN+=("$m"); NOTES+=("$m: $short")
     else UNSURE+=("$m"); WORKS+=("$m")
     fi
+  }
+  PENDING=()
+  for m in $ON; do
+    judge "$m"
+    if [ "$verdict" = disabled ]; then PENDING+=("$m"); else place "$m"; fi
+  done
+  # Models that said "is disabled": wait for the switch-on to arrive and ask again (up to about 1.5 minutes).
+  for round in 1 2 3; do
+    [ "${#PENDING[@]}" = 0 ] && break
+    info "Waiting for ${#PENDING[@]} just-switched-on model(s) to be ready, then asking again..."
+    sleep 30
+    NEXT=()
+    for m in "${PENDING[@]}"; do
+      judge "$m"
+      if [ "$verdict" = disabled ]; then NEXT+=("$m"); else place "$m"; fi
+    done
+    PENDING=("${NEXT[@]}")
+  done
+  for m in "${PENDING[@]}"; do   # still "disabled": Claude is off for good; a Gemini model is left on (unsure)
+    if [[ "$m" == claude* ]]; then verdict=broken; short="needs pay-as-you-go"; NEED_PAYG=1; else verdict=""; fi
+    place "$m"
   done
   if [ "${#BROKEN[@]}" -gt 0 ] && [ "${#WORKS[@]}" = 0 ]; then
     warn "No model answered the test question (last error: ${why:0:120}); leaving the models as they are."
@@ -432,7 +463,7 @@ else
       for n in "${NOTES[@]}"; do info "  - $n"; done
     fi
   fi
-  [ "${#UNSURE[@]}" -gt 0 ] && warn "No clear answer from ${UNSURE[*]} (busy or slow?); left on. If one fails in chat, pick another model."
+  [ "${#UNSURE[@]}" -gt 0 ] && warn "No clear answer from ${UNSURE[*]} (just switched on, or busy); left on. Run the setup again in a few minutes to recheck them."
   ok "Models on (${#WORKS[@]}): ${WORKS[*]}"
   TURNED_ON+=("${#WORKS[@]} models")
   [ "$NEED_PAID" = 1 ] && info "Models marked 'not in the free trial' need a paid Gemini Enterprise subscription; run this setup again after upgrading."
@@ -488,8 +519,8 @@ step "Installing the upload-my-files command"
 mkdir -p "$HOME/bin" || die "Can't create $HOME/bin"
 cat > "$HOME/bin/upload-my-files" <<'UPLOAD_MY_FILES_EOF'
 #!/usr/bin/env bash
-# upload-my-files - copy your own files from Cloud Shell into the "My Uploads" folder in your Google Drive,
-# so your Gemini Enterprise agents can use them next to the Graywing demo data.
+# upload-my-files - copy your own files from Cloud Shell into the "My Uploads" folder in your Google Drive and
+# into the lab's "My uploads" data store, so your Gemini Enterprise agents can use them next to the Graywing data.
 #
 #   upload-my-files              uploads everything in ~/my-files (subfolders are kept)
 #   upload-my-files <folder>     uploads everything in <folder> instead
@@ -516,7 +547,7 @@ else SETUP_CMD="bash <(curl -fsSL https://raw.githubusercontent.com/tridorian/YP
 
 mkdir -p "$WORK" || { echo "Can't create $WORK"; exit 1; }
 LOG="$WORK/setup.log"
-STEPS=4
+STEPS=5
 STEP=0
 T0=$SECONDS
 
@@ -957,11 +988,66 @@ else
   warn "Some files could not be uploaded (listed above). Run $ME again to retry just those."
 fi
 
+# ---- 5. the My uploads data store (what your agent searches) -----------------------------------------------
+# The Drive copy is for you to open; agents in the lab read the Google-hosted "My uploads" data store that the lab
+# setup made. Supported there: PDF, Word, PowerPoint, Excel, HTML and text files.
+step "Adding your files to the My uploads data store"
+STORE="${UPLOADS_STORE:-graywing-uploads}"
+DS_URL="https://discoveryengine.googleapis.com/v1alpha/projects/$PROJECT/locations/global/collections/default_collection/dataStores/$STORE"
+TOK="$(gcloud auth print-access-token 2>/dev/null)"
+GCODE=""; GBODY=""
+gapi() {  # gapi METHOD URL [JSON] -> $GCODE = HTTP status, $GBODY = body (call it directly, not inside $( ))
+  local out; out="$(mktemp)"
+  GCODE="$(curl -s -o "$out" -w '%{http_code}' -X "$1" -H "Authorization: Bearer $TOK" -H "X-Goog-User-Project: $PROJECT" \
+    -H "Content-Type: application/json" --max-time 120 ${3:+--data "$3"} "$2")"
+  GBODY="$(cat "$out")"; log "API   $1 ${2#https://} -> $GCODE"; rm -f "$out"
+}
+if [ "$LOCAL" = "-" ]; then
+  info "Nothing to add yet."
+elif gapi GET "$DS_URL"; [ "$GCODE" != 200 ]; then
+  warn "No \"My uploads\" data store in this project (the lab setup makes it). Your files are in Drive only."
+else
+  BUCKET="gs://$PROJECT-graywing-data"
+  gcloud storage buckets describe "$BUCKET" >/dev/null 2>&1 \
+    || gcloud storage buckets create "$BUCKET" --location=us --uniform-bucket-level-access >>"$LOG" 2>&1 \
+    || die "Could not create the bucket $BUCKET (see $LOG)."
+  STAGE="$(mktemp -d)"
+  find "$LOCAL" -mindepth 1 -name '.*' -prune -o -type f \( -iname '*.pdf' -o -iname '*.docx' -o -iname '*.pptx' \
+    -o -iname '*.xlsx' -o -iname '*.html' -o -iname '*.htm' -o -iname '*.txt' \) -print | while IFS= read -r f; do
+    r="${f#"$LOCAL"/}"; cp "$f" "$STAGE/${r//\// - }"
+  done
+  N="$(find "$STAGE" -type f | wc -l | tr -d ' ')"
+  SKIPPED=$(( COUNT - N ))
+  if [ "$N" = 0 ]; then
+    warn "None of your files are a type the data store can read (PDF, Word, PowerPoint, Excel, HTML, text)."
+  else
+    gcloud storage cp "$STAGE"/* "$BUCKET/uploads/" --quiet >>"$LOG" 2>&1 || die "Could not copy your files to $BUCKET (see $LOG)."
+    gapi POST "$DS_URL/branches/default_branch/documents:import" \
+      "{\"gcsSource\":{\"inputUris\":[\"$BUCKET/uploads/*\"],\"dataSchema\":\"content\"},\"reconciliationMode\":\"INCREMENTAL\"}"
+    BODY="$GBODY"
+    [ "$GCODE" = 200 ] || die "Could not start adding your files to the data store ($GCODE): $(printf '%s' "$BODY" | python3 -c 'import json,sys; print(json.load(sys.stdin)["error"]["message"])' 2>/dev/null)"
+    OP="$(printf '%s' "$BODY" | python3 -c 'import json,sys; print(json.load(sys.stdin)["name"])')"
+    DONE=""
+    for _ in $(seq 60); do
+      gapi GET "https://discoveryengine.googleapis.com/v1alpha/$OP"; BODY="$GBODY"
+      DONE="$(printf '%s' "$BODY" | python3 -c 'import json,sys; d=json.load(sys.stdin); print("1" if d.get("done") else "")' 2>/dev/null)"
+      [ -n "$DONE" ] && break; sleep 5
+    done
+    if [ -n "$DONE" ]; then
+      ok "Added to the My uploads data store: $(printf '%s' "$BODY" | python3 -c 'import json,sys; print(json.load(sys.stdin).get("metadata",{}).get("successCount","?"))') of $N file(s). Give it a few minutes to be searchable."
+    else
+      warn "Your files are still being added to the data store; they become searchable within a few minutes."
+    fi
+  fi
+  [ "$SKIPPED" -gt 0 ] && info "$SKIPPED file(s) skipped for the data store (not PDF, Word, PowerPoint, Excel, HTML or text); they are in Drive."
+  rm -rf "$STAGE"
+fi
+
 # ---- done ------------------------------------------------------------------------------------------------
 log "######## upload-my-files finished in $(elapsed) (rc=$RC): $FOLDER_URL"
 line="  ════════════════════════════════════════════════════════════════════════"
 printf '\n\033[32m%s\033[0m\n' "$line"
-printf '   \033[1mYOUR UPLOADS FOLDER IN GOOGLE DRIVE\033[0m  (drag more files into it any time)\n'
+printf '   \033[1mYOUR UPLOADS FOLDER IN GOOGLE DRIVE\033[0m  (a copy to open; your agent reads the My uploads data store)\n'
 printf '   \033[4;36m%s\033[0m\n' "$FOLDER_URL"
 printf '\033[32m%s\033[0m\n\n' "$line"
 if [ "$LOCAL" = "-" ]; then
@@ -969,10 +1055,10 @@ if [ "$LOCAL" = "-" ]; then
   printf '   1. Click the \033[1m⋮\033[0m menu at the top right of this terminal, then \033[1mUpload\033[0m, and pick your files.\n'
   printf '   2. Set the destination to \033[1m%s\033[0m (if they landed in your home folder: mv ~/FILENAME %s/).\n' "$SRC" "$SRC"
   printf '   3. Run \033[1m%s\033[0m again.\n\n' "$ME"
-  printf '   \033[2mOr just open the folder link above and drag your files into it.\033[0m\n\n'
+  printf '   \033[2mFor a one-off question you can also attach a file straight in the chat.\033[0m\n\n'
 else
-  printf '   Next: in your Chief of Staff agent, add the %s as a Google Drive source,\n' "$LABEL"
-  printf '   or tell it: Also use the files in my %s.\n\n' "$LABEL"
+  printf '   Next: in your Chief of Staff agent, add the \033[1mMy uploads\033[0m data store as a data source,\n'
+  printf '   then tell it: Also use the files in My uploads.\n\n'
 fi
 printf '   \033[2mLinks saved in %s · full log in %s\033[0m\n\n' "$WORK/links.txt" "$LOG"
 exit "$RC"
@@ -980,7 +1066,7 @@ UPLOAD_MY_FILES_EOF
 chmod +x "$HOME/bin/upload-my-files"
 grep -qs 'graywing lab: upload-my-files' "$HOME/.bashrc" \
   || printf '\n# graywing lab: upload-my-files\nexport PATH="$HOME/bin:$PATH"\n' >> "$HOME/.bashrc"
-ok "Installed: upload-my-files (copies ~/my-files into \"$MY_UPLOADS\" in your Drive)"
+ok "Installed: upload-my-files (adds ~/my-files to the My uploads data store and \"$MY_UPLOADS\" in your Drive)"
 
 # ---- 8. demo data and My Uploads in My Drive -------------------------------------------------------------
 step "Copying the Graywing demo data into your Google Drive"
@@ -996,6 +1082,40 @@ esac
 rm -rf data && mkdir data && unzip -q data.zip -d data || die "The demo data zip is damaged."
 DATA_DIR="$(find data -mindepth 1 -maxdepth 1 -type d | head -1)"
 ok "Downloaded $(find "$DATA_DIR" -type f | wc -l | tr -d ' ') files ($(du -sh data.zip | cut -f1))"
+
+# 8a. The demo data store: documents go to a Cloud Storage bucket in this project, then into the data store.
+#     Titles are the folder path joined with " - ", e.g. "Churn Radar - Customer Success - Documents - ...".
+#     Photos can't be searched this way and are skipped. Re-runs skip this when the store already has documents.
+if [ "${WITH_ACTIONS:-0}" != 1 ]; then
+  DOCS_URL="$BASE/collections/default_collection/dataStores/$DATA_STORE/branches/default_branch/documents"
+  api GET "$DOCS_URL?pageSize=1"
+  if [ "$CODE" = 200 ] && [ -n "$(jv 'd.get("documents",[{}])[0].get("name","")')" ]; then
+    ok "The Graywing demo data store already has the documents"
+  else
+    BUCKET="gs://$PROJECT-graywing-data"
+    gcloud storage buckets describe "$BUCKET" >/dev/null 2>&1 \
+      || gcloud storage buckets create "$BUCKET" --location=us --uniform-bucket-level-access >>"$LOG" 2>&1 \
+      || die "Could not create the bucket $BUCKET (see $LOG)."
+    rm -rf flat && mkdir flat
+    find "$DATA_DIR" -type f \( -iname '*.pdf' -o -iname '*.docx' -o -iname '*.pptx' -o -iname '*.xlsx' \) | while IFS= read -r f; do
+      r="${f#"$DATA_DIR"/}"; cp "$f" "flat/${r//\// - }"
+    done
+    NDOCS="$(find flat -type f | wc -l | tr -d ' ')"
+    spin "Copying $NDOCS documents to $BUCKET" gcloud storage cp flat/* "$BUCKET/docs/" --quiet \
+      || die "Could not copy the documents to $BUCKET (see $LOG)."
+    api POST "$DOCS_URL:import" "{\"gcsSource\":{\"inputUris\":[\"$BUCKET/docs/*\"],\"dataSchema\":\"content\"},\"reconciliationMode\":\"INCREMENTAL\"}"
+    [ "$CODE" = 200 ] || die "Could not start loading the documents into the data store ($CODE): $(err)"
+    OP="$(jv 'd["name"]')"
+    if spin "Loading $NDOCS documents into the Graywing demo data store (about 2 minutes)" wait_op "$OP"; then
+      api GET "$HOST/v1alpha/$OP"
+      ok "Graywing demo data store: $(jv 'd.get("metadata",{}).get("successCount","?")') of $NDOCS documents loaded"
+      [ "$(jv 'd.get("metadata",{}).get("failureCount","0")')" = 0 ] || warn "Some documents could not be loaded (see $LOG)."
+    else
+      warn "The documents are still loading; they show up in the app within a few minutes."
+    fi
+    rm -rf flat
+  fi
+fi
 rm -f folder_id.txt
 UPLOAD_LOG="$LOG" QUOTA_PROJECT="$PROJECT" python3 drive_upload_lab.py "$DATA_DIR" folder_id.txt
 RC=$?
@@ -1073,10 +1193,10 @@ printf '\n\033[32m%s\033[0m\n' "$line"
 printf '\033[1;32m   ✔ Setup complete in %s\033[0m\n\n' "$(elapsed)"
 printf '   \033[1mYOUR GEMINI ENTERPRISE APP\033[0m  (%s · open this and bookmark it)\n' "${APP_TITLE:-$APP_ID}"
 printf '   \033[4;36m%s\033[0m\n\n' "$WEB_URL"
-printf '   \033[1mGRAYWING DEMO DATA IN YOUR GOOGLE DRIVE\033[0m\n'
+printf '   \033[1mGRAYWING DEMO DATA IN YOUR GOOGLE DRIVE\033[0m  (to open the files yourself)\n'
 printf '   \033[4;36m%s\033[0m\n\n' "$DRIVE_URL"
 if [ -n "$UPLOADS_URL" ]; then
-  printf '   \033[1mMY UPLOADS\033[0m  (your own files: drag them in, or run upload-my-files)\n'
+  printf '   \033[1mMY UPLOADS\033[0m  (your own files: run upload-my-files; it fills this folder and the My uploads data store)\n'
   printf '   \033[4;36m%s\033[0m\n\n' "$UPLOADS_URL"
 fi
 if [ "${#TURNED_ON[@]}" -gt 0 ]; then
@@ -1088,9 +1208,14 @@ printf '   \033[2mLinks saved in %s · full log in %s\033[0m\n' "$WORK/links.txt
 printf '\033[32m%s\033[0m\n\n' "$line"
 printf '   \033[1mNext (once):\033[0m\n'
 printf '   1. Open the app link above (signed in as %s).\n' "$ACCOUNT"
-printf '   2. Click \033[1mConnectors\033[0m and \033[1mAuthorize\033[0m %s.\n' "$CONNECTED_NAMES"
-printf '      If it says "Data connector is not ready yet", wait a few minutes and try again.\n'
-printf '   3. Ask: "What does Graywing Ag Systems sell, and who are its biggest customers?"\n\n'
+if [ "${WITH_ACTIONS:-0}" = 1 ]; then
+  printf '   2. Click \033[1mConnectors\033[0m and \033[1mAuthorize\033[0m %s.\n' "$CONNECTED_NAMES"
+  printf '      If it says "Data connector is not ready yet", wait a few minutes and try again.\n'
+  printf '   3. Ask: "What does Graywing Ag Systems sell, and who are its biggest customers?"\n\n'
+else
+  printf '   2. Ask: "What does Graywing Ag Systems sell, and who are its biggest customers?" (no sign-in step needed)\n'
+  printf '   3. Build your agent: Agents > + Create agent; for its data, pick the \033[1mGraywing demo data\033[0m data store.\n\n'
+fi
 printf '   Your own files: put them in ~/my-files, then run \033[1mupload-my-files\033[0m (new terminal tabs find it;\n'
 printf '   in this one, run  export PATH="$HOME/bin:$PATH"  first).\n'
 printf '   Show the links again any time with:  cat %s\n\n' "$WORK/links.txt"

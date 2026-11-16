@@ -6,28 +6,30 @@
 |---|---|
 | Agent | Chief of Staff, plus five optional subagents |
 | Platform | Gemini Enterprise, no-code agent builder |
-| Data | Google Drive (read only) |
+| Data | Graywing demo data (a data store in your lab project, read only) |
 | Date | November 16, 2026 |
 
 ## Overview
 
 Build a Chief of Staff agent for Helen Marsh, CEO of Graywing Ag Systems, a made-up maker of grain dryers and elevators. It reads every department's files, tells Helen what matters across the company, and writes the follow-up for her: the email, the meeting invite, the brief. Get a first version working in about 10 minutes with the starter prompt, then spend the rest of the time making it better.
 
-### Everything is in Google Drive
+### Everything is in the Graywing demo data
 
-> All the data lives in one Drive folder, Graywing Ag Systems (Demo Data), in your My Drive, with one folder per department.
+> All the data the agent reads is in one data store, **Graywing demo data**, that the setup made in your lab project. It holds every department's files. Each file's title starts with its folder path, for example "Churn Radar - Customer Success - Documents - QBR Notes - Kettleridge Cooperative - Q3 QBR Notes".
 >
-> The email and calendars are files in that folder too: each "Gmail (simulated)" folder holds the email threads as PDFs plus a Mailbox Index sheet, and each "Calendar (simulated)" folder holds a calendar sheet.
+> The email and calendars are files in it too: each team's "Gmail (simulated)" files are the email threads as PDFs plus a Mailbox Index sheet, and its "Calendar (simulated)" file is a calendar sheet.
+>
+> To open the files yourself, use the copy in your My Drive, **Graywing Ag Systems (Demo Data)**, with one folder per department. The agent doesn't read that copy.
 >
 > The agent only reads. It can't send email, add calendar events or create files. When you want an email or a document, it writes it out and you copy it where it goes.
 >
 > Assume today is **Thursday, Oct 15, 2026**. Helen's exec staff meeting is Friday, Oct 23.
 
-### Read from Drive, write it out for you
+### Read from the files, write it out for you
 
 | When you ask for… | The agent… |
 |---|---|
-| Facts, figures, emails, meetings | reads only the Graywing Ag Systems (Demo Data) folder in Drive |
+| Facts, figures, emails, meetings | reads only the Graywing demo data |
 | An email | writes it in the chat (To, Subject, body), ready to copy into Gmail. It can't send it |
 | A meeting or time block | writes the invite (title, date, time with time zone, attendees, agenda), ready to copy into Google Calendar |
 | A memo or brief | writes it in the chat, or in **Canvas** if you want to edit it; copy or export it to Google Docs [VERIFY UI] |
@@ -36,19 +38,19 @@ Build a Chief of Staff agent for Helen Marsh, CEO of Graywing Ag Systems, a made
 | Market, price or news context | uses **Google Search** (turn on web search in the chat box first), and says which facts came from the web and which from the files |
 | An image | can't make one. Ask in the main chat instead, then add the image to your slides by hand |
 
-### Step 0: connect first
+### Step 0: check the data first
 
-In the main Gemini Enterprise chat (not an agent), ask this and click **Authorize** if it asks:
+There's nothing to connect or authorize. In the main Gemini Enterprise chat (not an agent), ask:
 
-"List three files in my Drive folder Graywing Ag Systems (Demo Data)."
+"Using the Graywing demo data, what does Graywing Ag Systems sell?"
 
-Without this the agent can't see the files. Don't start building until Drive lists files.
+A good answer names grain dryers and elevators and cites Graywing files. If it can't find anything, wait a few minutes (the setup may still be loading the files) and ask again. Don't start building until it answers from the files.
 
 ### Build it
 
 1. In Gemini Enterprise: Agents → + Create agent → Chat agent.
 2. Paste the starter prompt below and send it. The builder drafts the name, description and instructions.
-3. Data: Add data sources & tools → Google Drive. If you can pick a folder, pick Graywing Ag Systems (Demo Data). [VERIFY UI] Google Drive is the only data source; there's nothing else to add.
+3. Data: Add data sources & tools → pick the **Graywing demo data** data store. [VERIFY UI] It's the only data source you need. (Add **My uploads** too later, for your own files.)
 4. Model: in the agent's settings, pick a Gemini model (for example the newest Gemini Pro or Flash shown). [VERIFY UI] The picker only lists models your lab can use: the setup switches off the ones the free trial doesn't include (the newest Gemini 4 models and Claude). If an answer stops with "not available during the free trial", run the setup again and pick another model.
 5. Open Preview and ask the five questions below. For the last two, the agent writes the email, invite, agenda and slides in the chat; check them against the answer key, then copy them into Gmail, Calendar, Docs or Slides yourself if you want.
 6. Improve the answers with round 2 below, re-testing after each change.
@@ -57,11 +59,11 @@ Without this the agent can't see the files. Don't start building until Drive lis
 ## Chief of Staff
 
 **One answer across every department, for the CEO**
-Works for: Helen Marsh, CEO · Folder: Graywing Ag Systems (Demo Data), every department folder
+Works for: Helen Marsh, CEO · Data: Graywing demo data, every department
 
 **STARTER PROMPT**
 
-> Create an executive agent called Chief of Staff for Helen Marsh, CEO of Graywing Ag Systems. Assume today is Thursday, Oct 15, 2026. Read facts only from Google Drive, in the folder "Graywing Ag Systems (Demo Data)": the customer success, maintenance, sales, recruiting and finance folders inside it, including each team's email in "Gmail (simulated)" (thread PDFs and the Mailbox Index sheet) and calendars in "Calendar (simulated)". When I ask for an email, meeting invite, memo, deck or table, write it out ready to copy into Gmail, Calendar, Docs, Slides or Sheets (or into Canvas if I ask): an email with To, Subject and body; an invite with title, date, time with time zone, attendees and agenda; a deck slide by slide. You can't send or save anything yourself. Use Google Search only for outside context such as markets, prices or news, and label it as outside context. Answer questions that cross departments: start with the bottom line in two sentences, then one short section per department, then how the departments' issues connect, then three to five next steps, each with an owner. Name the file behind every fact and never add figures the files don't contain. If a tool you need is missing or fails, say which one and stop. Never show a link, file, image or number you did not get from a tool or a file.
+> Create an executive agent called Chief of Staff for Helen Marsh, CEO of Graywing Ag Systems. Assume today is Thursday, Oct 15, 2026. Read facts only from the "Graywing demo data" data store: the customer success, maintenance, sales, recruiting and finance files in it, including each team's email in its "Gmail (simulated)" files (thread PDFs and the Mailbox Index sheet) and calendars in its "Calendar (simulated)" files. When I ask for an email, meeting invite, memo, deck or table, write it out ready to copy into Gmail, Calendar, Docs, Slides or Sheets (or into Canvas if I ask): an email with To, Subject and body; an invite with title, date, time with time zone, attendees and agenda; a deck slide by slide. You can't send or save anything yourself. Use Google Search only for outside context such as markets, prices or news, and label it as outside context. Answer questions that cross departments: start with the bottom line in two sentences, then one short section per department, then how the departments' issues connect, then three to five next steps, each with an owner. Name the file behind every fact and never add figures the files don't contain. If a tool you need is missing or fails, say which one and stop. Never show a link, file, image or number you did not get from a tool or a file.
 
 Try these in Preview:
 
@@ -116,15 +118,15 @@ One prompt each. **Where** says where to paste it; **Check** says what to look f
 8. **Compare models.** Where: your agent. Pick a different Gemini model in its settings [VERIFY UI] and ask question 1 again.
    "What should I raise at the next leadership meeting?"
    Check: speed, length, and which one still has the facts in the answer key.
-9. **Your own file.** Where: your agent. Upload a file to My Uploads ([BRING-YOUR-OWN-FILES.md](BRING-YOUR-OWN-FILES.md); nothing confidential), add My Uploads to the agent's Drive source [VERIFY UI], and add to its instructions: "Also read the folder My Uploads, and mark facts from it as (my upload)."
-   "Summarize my file in My Uploads in five bullets, then tell me which Graywing issue it most resembles and why."
+9. **Your own file.** Where: your agent. Load a file with `upload-my-files` in Cloud Shell ([BRING-YOUR-OWN-FILES.md](BRING-YOUR-OWN-FILES.md); nothing confidential) and wait a few minutes. Add the **My uploads** data store to the agent's data sources [VERIFY UI], and add to its instructions: "Also read the My uploads data store, and mark facts from it as (my upload)." (Short on time? Attach the file in the chat instead.)
+   "Summarize my file in My uploads in five bullets, then tell me which Graywing issue it most resembles and why."
    Check: each bullet is really in your file and marked (my upload).
 
 Last: **Swap Graywing for your business.** Rewrite the starter prompt for your own chief of staff: your folders, your meetings, the one cross-team question you wish you could answer on Monday morning.
 
 ## Go faster: add subagents
 
-Chief of Staff can do everything on its own. Subagents make it faster and sharper: each one knows one department's folder well, and Chief of Staff asks the right ones in parallel and puts their answers together. Subagents only answer questions; Chief of Staff writes the emails, invites and briefs.
+Chief of Staff can do everything on its own. Subagents make it faster and sharper: each one knows one department's files well, and Chief of Staff asks the right ones in parallel and puts their answers together. Subagents only answer questions; Chief of Staff writes the emails, invites and briefs.
 
 Subagents live inside your Chief of Staff agent. You don't build them as separate agents.
 
@@ -132,7 +134,7 @@ Subagents live inside your Chief of Staff agent. You don't build them as separat
 
 1. Open Chief of Staff in the agent builder and go to the **Flow** tab.
 2. Hover the Chief of Staff node and click **Add subagent**. [VERIFY UI]
-3. Give each subagent its own instructions (paste its prompt below) and its one Drive folder. No other tools. Repeat for all five.
+3. Give each subagent its own instructions (paste its prompt below) and the **Graywing demo data** data store [VERIFY UI]. Its prompt keeps it to its own department's files. No other tools. Repeat for all five.
 4. Add this line to Chief of Staff's instructions: "For department facts, ask the matching subagents first, all in the same step, then combine their answers and name which subagent each fact came from."
 5. In Preview, ask Chief of Staff each subagent's test question, then: **"What is the Connect 5.2.0 problem costing us, and when does it stop?"** It should ask Churn Radar, Budget Watch and Talent Scout together and come back with one cause and one end date.
 
@@ -142,7 +144,7 @@ Subagents live inside your Chief of Staff agent. You don't build them as separat
 
 **Spots customers likely to leave, and why** · Rachel Kim, VP Customer Success · Folder: Churn Radar - Customer Success
 
-> Create a customer success agent called Churn Radar for Rachel Kim, VP Customer Success at Graywing Ag Systems. Assume today is Thursday, Oct 15, 2026. Read only the Google Drive folder "Churn Radar - Customer Success" inside "Graywing Ag Systems (Demo Data)": the Customer Success Data sheet, the playbook, release notes and QBR notes in Documents, "Gmail (simulated)" and "Calendar (simulated)". Rank accounts by churn risk using the playbook's health score rules and give the evidence. Lead with the answer, name the file behind every fact, and never invent numbers.
+> Create a customer success agent called Churn Radar for Rachel Kim, VP Customer Success at Graywing Ag Systems. Assume today is Thursday, Oct 15, 2026. Read only the Churn Radar files in the Graywing demo data (their titles start with "Churn Radar - Customer Success"): the Customer Success Data sheet, the playbook, release notes and QBR notes in Documents, "Gmail (simulated)" and "Calendar (simulated)". Rank accounts by churn risk using the playbook's health score rules and give the evidence. Lead with the answer, name the file behind every fact, and never invent numbers.
 
 Test: *Which accounts are most at risk of churning, and why?*
 
@@ -152,7 +154,7 @@ Test: *Which accounts are most at risk of churning, and why?*
 
 **Gets technicians to the safe fix fast** · Dale Hoffman, Maintenance & Field Service Supervisor · Folder: FieldFix - Operations & Maintenance
 
-> Create a maintenance agent called FieldFix for Dale Hoffman, Maintenance & Field Service Supervisor at Graywing Ag Systems. Read only the Google Drive folder "FieldFix - Operations & Maintenance" inside "Graywing Ag Systems (Demo Data)": the Maintenance Data sheet, the Equipment Manuals and Safety & SOPs folders, and "Gmail (simulated)". Give safety steps first, then the procedure from the manual with the page number, the repair history and whether the parts are in stock. Never guess a procedure that isn't in the manuals.
+> Create a maintenance agent called FieldFix for Dale Hoffman, Maintenance & Field Service Supervisor at Graywing Ag Systems. Read only the FieldFix files in the Graywing demo data (their titles start with "FieldFix - Operations & Maintenance"): the Maintenance Data sheet, the Equipment Manuals and Safety & SOPs folders, and "Gmail (simulated)". Give safety steps first, then the procedure from the manual with the page number, the repair history and whether the parts are in stock. Never guess a procedure that isn't in the manuals.
 
 Test: *Do we have plenum temperature sensors in stock?*
 
@@ -162,7 +164,7 @@ Test: *Do we have plenum temperature sensors in stock?*
 
 **Shows why big deals stall** · Ryan Caldwell, Senior Account Executive · Folder: Deal Desk - Revenue Operations
 
-> Create a sales agent called Deal Desk for Ryan Caldwell, Senior Account Executive at Graywing Ag Systems. Assume today is Thursday, Oct 15, 2026. Read only the Google Drive folder "Deal Desk - Revenue Operations" inside "Graywing Ag Systems (Demo Data)": the CRM Data sheet, the competitive landscape and pricing guide in Documents, the Call Notes, "Gmail (simulated)" and "Calendar (simulated)". Flag stalled deals using the stall rules and say which rules fired and why. Cite opportunity IDs, and never invent numbers or promise discounts.
+> Create a sales agent called Deal Desk for Ryan Caldwell, Senior Account Executive at Graywing Ag Systems. Assume today is Thursday, Oct 15, 2026. Read only the Deal Desk files in the Graywing demo data (their titles start with "Deal Desk - Revenue Operations"): the CRM Data sheet, the competitive landscape and pricing guide in Documents, the Call Notes, "Gmail (simulated)" and "Calendar (simulated)". Flag stalled deals using the stall rules and say which rules fired and why. Cite opportunity IDs, and never invent numbers or promise discounts.
 
 Test: *Which deals are stalled, and why?*
 
@@ -172,7 +174,7 @@ Test: *Which deals are stalled, and why?*
 
 **Screens applicants fairly and fast** · Erin Castillo, Talent Acquisition Manager · Folder: Talent Scout - Human Resources
 
-> Create a recruiting agent called Talent Scout for Erin Castillo, Talent Acquisition Manager at Graywing Ag Systems. Assume today is Thursday, Oct 15, 2026. Read only the Google Drive folder "Talent Scout - Human Resources" inside "Graywing Ag Systems (Demo Data)": the Recruiting Data sheet, the Resumes and Job Descriptions folders, the hiring guidelines in Documents, "Gmail (simulated)" and "Calendar (simulated)". Report each open role's status and check candidates against the role's must-haves and location rule. Use job-related criteria only; you recommend and a person decides.
+> Create a recruiting agent called Talent Scout for Erin Castillo, Talent Acquisition Manager at Graywing Ag Systems. Assume today is Thursday, Oct 15, 2026. Read only the Talent Scout files in the Graywing demo data (their titles start with "Talent Scout - Human Resources"): the Recruiting Data sheet, the Resumes and Job Descriptions folders, the hiring guidelines in Documents, "Gmail (simulated)" and "Calendar (simulated)". Report each open role's status and check candidates against the role's must-haves and location rule. Use job-related criteria only; you recommend and a person decides.
 
 Test: *Where do we stand on each open role?*
 
@@ -182,7 +184,7 @@ Test: *Where do we stand on each open role?*
 
 **Explains where spending went over, and why** · Owen Mercer, FP&A Manager · Folder: Budget Watch - Finance
 
-> Create a finance agent called Budget Watch for Owen Mercer, FP&A Manager at Graywing Ag Systems. Read only the Google Drive folder "Budget Watch - Finance" inside "Graywing Ag Systems (Demo Data)": the Finance Data sheet, the variance reporting policy in Documents, Variance Reports, Invoices & Notices, and "Gmail (simulated)". For a month, list every line more than 10% and more than $5,000 over budget, explain each with the transactions behind it, and say whether it is one-time or recurring and why. Lead with the bottom line and never estimate numbers.
+> Create a finance agent called Budget Watch for Owen Mercer, FP&A Manager at Graywing Ag Systems. Read only the Budget Watch files in the Graywing demo data (their titles start with "Budget Watch - Finance"): the Finance Data sheet, the variance reporting policy in Documents, Variance Reports, Invoices & Notices, and "Gmail (simulated)". For a month, list every line more than 10% and more than $5,000 over budget, explain each with the transactions behind it, and say whether it is one-time or recurring and why. Lead with the bottom line and never estimate numbers.
 
 Test: *Which overruns are recurring and which are one-time?*
 
