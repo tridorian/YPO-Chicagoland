@@ -410,6 +410,14 @@ if [ -z "$MODELS" ]; then
 else
   # A model an earlier run switched off stays off (switching it back on takes minutes to reach the chat, so a
   # re-run couldn't judge it); RECHECK_MODELS=1 tests every model again.
+  # Models known not to work in the lab: switched off without testing (SKIP_MODELS="" tests them all).
+  SKIP_MODELS="${SKIP_MODELS-gemini-4-hydrogen gemini-4-argon gemini-4-carbon claude-opus-5-5 claude-sonnet-5-5}"
+  SKIPPED="$(printf '%s\n' $MODELS | grep -xF -f <(printf '%s\n' $SKIP_MODELS) | tr '\n' ' ')"
+  if [ -n "${SKIPPED// }" ]; then
+    MODELS="$(printf '%s\n' $MODELS | grep -vxF -f <(printf '%s\n' $SKIPPED) | tr '\n' ' ')"
+    set_models "$SKIPPED" MODEL_DISABLED && info "Switched off models that don't work in the lab: $SKIPPED" \
+      || warn "Could not switch off $SKIPPED ($CODE): $(err). Don't pick them in the chat."
+  fi
   api GET "$ENGINE"
   KEPT_OFF=""
   if [ "${RECHECK_MODELS:-0}" != 1 ]; then
