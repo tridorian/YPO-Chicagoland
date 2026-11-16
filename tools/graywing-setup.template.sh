@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Graywing Ag Systems - Gemini Enterprise lab setup. Run in Cloud Shell of a fresh Qwiklabs project.
-# Steps: project -> APIs -> find the lab's Gemini Enterprise app -> connect Google Drive (search; WITH_ACTIONS=1 adds
+# Steps: project -> APIs -> find the lab's Gemini Enterprise app -> connect Google Drive (search + actions; WITH_ACTIONS=1 adds
 # Gmail, Calendar and actions) -> turn on app features, the models the lab can use and Google Search -> Drive check ->
 # install the upload-my-files command -> copy the demo data into your My Drive (emails and calendars are simulated
 # as files there) and make an empty "My Uploads" folder -> wait for the connectors, print your links.
@@ -21,7 +21,9 @@ WORK="${WORK:-$HOME/graywing-lab}"
 # Feature Management switches (key:ON|OFF). Merged into the app's existing settings; unknown keys are skipped.
 FEATURES_WANT="no-code-agent-builder:ON agent-gallery:ON prompt-gallery:ON notebook-lm:ON model-selector:ON
   workflow-agents:ON multi-agent-orchestration:ON personalization-memory:ON disable-canvas:OFF canvas-app-builder:ON
-  disable-image-generation:OFF disable-video-generation:OFF disable-google-drive-upload:OFF disable-talk-to-content:OFF"
+  disable-image-generation:OFF disable-video-generation:OFF disable-google-drive-upload:OFF disable-talk-to-content:OFF
+  canvas-workspace:ON canvas-app-sharing:ON remote-vm:ON code-extraction:ON skills:ON plugins:ON session-sharing:ON
+  cross-product-intelligence:ON single-agent-orchestration:ON preview-agents:ON agent-scheduling:ON people-search:ON"
 # ---------------------------------------------------------------------------------------------------------
 
 mkdir -p "$WORK" || { echo "Can't create $WORK"; exit 1; }
@@ -176,28 +178,47 @@ else
   info "No Gemini Enterprise app in this project yet; one called \"$APP_NAME\" is made in the next step."
 fi
 
-# ---- 4. data stores (default) or connectors (WITH_ACTIONS=1) ----------------------------------------------
-# Default: no connectors. In the Qwiklabs lab people can't authorize connectors ("Data connector is not ready
-# yet"), and a no-code agent can't read Drive without that. So the demo data goes into a Google-hosted data store
-# in this project (step 8), which every user of the app can search with no sign-in step, plus an empty
-# "My uploads" store for people's own files (upload-my-files). The lab's ready-made app must keep at least two
-# data stores linked, which these two are. WITH_ACTIONS=1 instead connects Google Drive, Gmail and Google
-# Calendar with actions (each person must then click Authorize in the app).
+# ---- 4. Google Drive connector + data stores ------------------------------------------------------------
+# Google Drive is connected the way the console's "Select all actions" does it: search + actions, an OAuth action
+# config and the list of enabled Drive actions. Without those two, Authorize in the app answers "Data connector is
+# not ready yet" and a no-code agent can't read Drive. Each person clicks Authorize once; answers then link to the
+# real Drive files. Two Google-hosted data stores are linked too (the lab's ready-made app needs at least two):
+# "Graywing demo data" (the documents, searchable with no sign-in: a fallback if Authorize fails) and "My uploads".
+# NO_DRIVE=1: data stores only. WITH_ACTIONS=1: also Gmail and Google Calendar (untested in the lab).
 MODES='["FEDERATED","ACTIONS"]'
 DATA_STORE="$CONNECTOR_PREFIX-data"; UPLOADS_STORE="$CONNECTOR_PREFIX-uploads"
+DRIVE_ACTIONS='["copy_file","create_file","download_file_content","get_file_metadata","get_file_permissions","googledocs_read_doc","googledocs_update_doc","googlesheets_get_spreadsheet","googlesheets_get_values","googlesheets_insert_dimension","googlesheets_update_formulas","googlesheets_update_spreadsheet","googlesheets_update_values","googleslides_read_presentation","googleslides_update_presentation","list_recent_files","list_shared_drives","read_file_content","search_files","share_file","trash_file","update_file"]'
+ACTION_CONFIG='{"actionParams":{"auth_type":"OAUTH","auth_key":"OAuth"},"useStaticSecrets":true,"createBapConnection":true}'
 if [ "${WITH_ACTIONS:-0}" = 1 ]; then
   step "Connecting Google Drive, Gmail and Google Calendar"
   CONNECTORS=("google_drive|$CONNECTOR_PREFIX-drive|Google Drive" "google_mail|$CONNECTOR_PREFIX-gmail|Gmail"
               "google_calendar|$CONNECTOR_PREFIX-calendar|Google Calendar")
-  CONNECTED="Google Drive, Gmail, Google Calendar (search + actions)"; CONNECTED_NAMES="Google Drive, Gmail and Google Calendar"
-else
+  CONNECTED="Google Drive, Gmail, Google Calendar (search + actions); data stores Graywing demo data and My uploads"
+  CONNECTED_NAMES="Google Drive, Gmail and Google Calendar"
+elif [ "${NO_DRIVE:-0}" = 1 ]; then
   step "Creating the Graywing data stores"
   CONNECTORS=()
   CONNECTED="data stores Graywing demo data and My uploads (no sign-in needed)"; CONNECTED_NAMES=""
+else
+  step "Connecting Google Drive and creating the Graywing data stores"
+  CONNECTORS=("google_drive|$CONNECTOR_PREFIX-drive|Google Drive")
+  CONNECTED="Google Drive (search + actions); data stores Graywing demo data and My uploads"; CONNECTED_NAMES="Google Drive"
 fi
-body() {  # body MODES_JSON -> setUpDataConnector request for $SRC_NAME / $CID / $CNAME
-  printf '{"collectionId":"%s","collectionDisplayName":"%s","dataConnector":{"dataSource":"%s","refreshInterval":"0s","connectorModes":%s,"entities":[{"entityName":"%s"}],"params":{}}}' \
-    "$CID" "$CNAME" "$SRC_NAME" "$1" "$SRC_NAME"
+body() {  # body MODES_JSON -> setUpDataConnector request for $SRC_NAME / $CID / $CNAME, with the console's action setup
+  local bap='{"supportedConnectorModes":["ACTIONS"]}'
+  [ "$SRC_NAME" = google_drive ] && bap="{\"supportedConnectorModes\":[\"ACTIONS\"],\"enabledActions\":$DRIVE_ACTIONS}"
+  printf '{"collectionId":"%s","collectionDisplayName":"%s","dataConnector":{"dataSource":"%s","refreshInterval":"0s","connectorModes":%s,"entities":[{"entityName":"%s"}],"params":{},"connectorSourceId":"%s","actionConfig":%s,"bapConfig":%s}}' \
+    "$CID" "$CNAME" "$SRC_NAME" "$1" "$SRC_NAME" "$SRC_NAME" "$ACTION_CONFIG" "$bap"
+}
+action_setup() {  # action_setup URL -> makes sure the connector has the OAuth action config and (Drive) enabled actions
+  api GET "$1"
+  local need="" mask="actionConfig"
+  [ "$(jv '(d.get("actionConfig") or {}).get("actionParams",{}).get("auth_type","")')" = OAUTH ] || need=1
+  if [ "$SRC_NAME" = google_drive ] && [ "$(jv 'len((d.get("bapConfig") or {}).get("enabledActions",[]))')" = 0 ]; then need=1; mask="actionConfig,bapConfig"; fi
+  [ -n "$need" ] || return 0
+  api PATCH "$1?updateMask=$mask" "{\"actionConfig\":$ACTION_CONFIG,\"bapConfig\":{\"supportedConnectorModes\":[\"ACTIONS\"]$([ "$SRC_NAME" = google_drive ] && printf ',"enabledActions":%s' "$DRIVE_ACTIONS")}}"
+  if [ "$CODE" = 200 ]; then log "action setup applied to $1"; else warn "Could not finish the $CNAME action setup ($CODE): $(err)"; fi
+  api GET "$1"
 }
 CIDS=(); DS_IDS=(); NO_ACTIONS=(); CHOSEN=()
 for c in "${CONNECTORS[@]}"; do
@@ -229,12 +250,14 @@ for c in "${CONNECTORS[@]}"; do
       NO_ACTIONS+=("$CNAME")
     fi
     for _ in $(seq 20); do api GET "$url"; [ -n "$(jv 'd["entities"][0]["dataStore"]')" ] && break; sleep 3; done
+    action_setup "$url"
     ok "$CNAME connector created ($(jv 'd.get("state","starting")' | tr 'A-Z' 'a-z'); it finishes starting in the background)"
   else
     if [ "$(jv '"ACTIONS" in d.get("connectorModes",[])')" != "True" ]; then
       api PATCH "$url?updateMask=connectorModes" "{\"connectorModes\":$MODES}"
       if [ "$CODE" = 200 ]; then api GET "$url"; else NO_ACTIONS+=("$CNAME"); api GET "$url"; fi
     fi
+    action_setup "$url"
     ok "$CNAME connector: $(jv 'd.get("state","")' | tr 'A-Z' 'a-z')"
   fi
   DS="$(jv 'd["entities"][0]["dataStore"].split("/")[-1]')"
@@ -256,13 +279,10 @@ make_store() {  # make_store ID "Display name" -> adds ID to DS_IDS (an unstruct
   fi
   DS_IDS+=("$1")
 }
-if [ "${WITH_ACTIONS:-0}" != 1 ]; then
-  make_store "$DATA_STORE" "Graywing demo data"
-  make_store "$UPLOADS_STORE" "My uploads"
-fi
+make_store "$DATA_STORE" "Graywing demo data"
+make_store "$UPLOADS_STORE" "My uploads"
 DS_JSON="$(printf '%s\n' "${DS_IDS[@]}" | python3 -c 'import json,sys; print(json.dumps(sys.stdin.read().split()))')"
 for n in "${NO_ACTIONS[@]}"; do
-  [ "${WITH_ACTIONS:-0}" = 1 ] || break
   warn "$n: actions could not be switched on here (search works). To add them in the console: Gemini Enterprise >"
   info "Data stores > $n > Actions > Enable actions > tick the actions > Enable actions."
 done
@@ -282,7 +302,7 @@ attach() {  # adds the connectors' data stores to the app, keeping anything alre
   ATTACHED=1
   # Data-store mode: take off connectors / helper stores an earlier run of this setup linked (ids starting with
   # the prefix that aren't today's two stores). The app keeps at least two data stores, which today's two are.
-  if [ "${WITH_ACTIONS:-0}" != 1 ]; then
+  if true; then
     local keep
     keep="$(P="$CONNECTOR_PREFIX-" jv "json.dumps([x for x in json.loads('$have') if not x.startswith(__import__('os').environ['P']) or x in $DS_JSON])" '{}')"
     if [ -n "$keep" ] && [ "$keep" != "$have" ]; then
@@ -356,7 +376,8 @@ fi
 MISSING="$(WANT="$(jv 'json.dumps(d["features"])' "$MERGE")" jv '" ".join(k for k, v in json.loads(__import__("os").environ["WANT"]).items() if (d.get("features") or {}).get(k) != v)')"
 if [ -z "$MISSING" ]; then
   ok "Features on: agent designer (no-code agents + workflows, multi-agent), agent and prompt gallery, model selector,"
-  info "  Canvas and its app builder, image and video generation, NotebookLM, memory, Drive upload, talk to content"
+  info "  Canvas (workspace, app builder, sharing), code execution, skills, plugins, image and video generation,"
+  info "  NotebookLM, memory, Drive upload, talk to content, session sharing, scheduling"
   TURNED_ON+=("no-code agents" "Canvas" "image and video generation")
 else
   warn "These features did not stick: $MISSING (set them under Configurations > Feature Management)."
@@ -386,6 +407,14 @@ model_answers() {  # model_answers MODEL_ID -> 0 if a one-word test question get
 if [ -z "$MODELS" ]; then
   warn "Could not read the list of models; turn them on under Configurations > Feature Management."
 else
+  # A model an earlier run switched off stays off (switching it back on takes minutes to reach the chat, so a
+  # re-run couldn't judge it); RECHECK_MODELS=1 tests every model again.
+  api GET "$ENGINE"
+  KEPT_OFF=""
+  if [ "${RECHECK_MODELS:-0}" != 1 ]; then
+    KEPT_OFF="$(WANT="$MODELS" jv '" ".join(m for m in __import__("os").environ["WANT"].split() if (d.get("modelConfigs") or {}).get(m) == "MODEL_DISABLED")')"
+    MODELS="$(printf '%s\n' $MODELS | grep -vxF -f <(printf '%s\n' $KEPT_OFF) | tr '\n' ' ')"
+  fi
   if ! set_models "$MODELS"; then
     warn "The app refused some models ($CODE: $(err)); trying again without the Claude models."
     set_models "$(printf '%s\n' $MODELS | grep -v '^claude' | tr '\n' ' ')" || warn "Could not turn on the models ($CODE): $(err)"
@@ -394,6 +423,7 @@ else
   ON="$(WANT="$MODELS" jv '" ".join(m for m in __import__("os").environ["WANT"].split() if (d.get("modelConfigs") or {}).get(m) == "MODEL_ENABLED")')"
   OFF="$(WANT="$MODELS" jv '" ".join(m for m in __import__("os").environ["WANT"].split() if (d.get("modelConfigs") or {}).get(m) != "MODEL_ENABLED")')"
   [ -n "$OFF" ] && warn "Models the app would not switch on: $OFF"
+  [ -n "$KEPT_OFF" ] && info "Kept off from an earlier run: $KEPT_OFF (RECHECK_MODELS=1 tests them again)."
   # 5b-2. Some listed models can't answer in this project: the free trial blocks some Gemini models
   #       ("not available during the free trial") and Claude needs pay-as-you-go (CLAUDE_OVERAGE_REQUIRED).
   #       Left on, they show in the model picker and "Auto" can route to them, so answers fail. Ask each model
@@ -446,8 +476,10 @@ else
     done
     PENDING=("${NEXT[@]}")
   done
-  for m in "${PENDING[@]}"; do   # still "disabled": Claude is off for good; a Gemini model is left on (unsure)
-    if [[ "$m" == claude* ]]; then verdict=broken; short="needs pay-as-you-go"; NEED_PAYG=1; else verdict=""; fi
+  for m in "${PENDING[@]}"; do   # still "disabled" after the rechecks: in lab tests these were the blocked ones
+    verdict=broken
+    if [[ "$m" == claude* ]]; then short="needs pay-as-you-go"; NEED_PAYG=1
+    else short="still not answering after being switched on (RECHECK_MODELS=1 tests it again)"; fi
     place "$m"
   done
   if [ "${#BROKEN[@]}" -gt 0 ] && [ "${#WORKS[@]}" = 0 ]; then
@@ -542,7 +574,7 @@ ok "Downloaded $(find "$DATA_DIR" -type f | wc -l | tr -d ' ') files ($(du -sh d
 # 8a. The demo data store: documents go to a Cloud Storage bucket in this project, then into the data store.
 #     Titles are the folder path joined with " - ", e.g. "Churn Radar - Customer Success - Documents - ...".
 #     Photos can't be searched this way and are skipped. Re-runs skip this when the store already has documents.
-if [ "${WITH_ACTIONS:-0}" != 1 ]; then
+if true; then
   DOCS_URL="$BASE/collections/default_collection/dataStores/$DATA_STORE/branches/default_branch/documents"
   api GET "$DOCS_URL?pageSize=1"
   if [ "$CODE" = 200 ] && [ -n "$(jv 'd.get("documents",[{}])[0].get("name","")')" ]; then
@@ -608,7 +640,7 @@ connectors_ready() {  # 0 = all active, 1 = still starting, 3 = one failed
       FAILED|INITIALIZATION_FAILED) return 3 ;;
       *) rc=1 ;;
     esac
-    if [ "${WITH_ACTIONS:-0}" = 1 ]; then
+    if true; then   # Authorize works only once the action side is active too
       case "$(jv 'd.get("actionState","")')" in CREATING|UPDATING|RUNNING) rc=1 ;; esac
     fi
   done
@@ -623,7 +655,7 @@ for c in "${CONNECTORS[@]}"; do
   api GET "$NBASE/collections/$CID/dataConnector"
   ST="$(jv 'd.get("state","")')"; AST="$(jv 'd.get("actionState","")')"
   if [ "$ST" = ACTIVE ]; then
-    ok "$CNAME connector: active$([ "${WITH_ACTIONS:-0}" = 1 ] && [ "$AST" = ACTIVE ] && echo ', actions active')"
+    ok "$CNAME connector: active$([ "$AST" = ACTIVE ] && echo ', actions active')"
   elif [ "$ST" = FAILED ] || [ "$ST" = INITIALIZATION_FAILED ]; then
     warn "$CNAME connector failed: $(jv 'd.get("errors","")'). Delete it under Gemini Enterprise > Data stores and paste the script again."
   else
@@ -664,10 +696,12 @@ printf '   \033[2mLinks saved in %s · full log in %s\033[0m\n' "$WORK/links.txt
 printf '\033[32m%s\033[0m\n\n' "$line"
 printf '   \033[1mNext (once):\033[0m\n'
 printf '   1. Open the app link above (signed in as %s).\n' "$ACCOUNT"
-if [ "${WITH_ACTIONS:-0}" = 1 ]; then
+if [ -n "$CONNECTED_NAMES" ]; then
   printf '   2. Click \033[1mConnectors\033[0m and \033[1mAuthorize\033[0m %s.\n' "$CONNECTED_NAMES"
-  printf '      If it says "Data connector is not ready yet", wait a few minutes and try again.\n'
-  printf '   3. Ask: "What does Graywing Ag Systems sell, and who are its biggest customers?"\n\n'
+  printf '      If it says "Data connector is not ready yet", wait a few minutes, refresh the page and try again.\n'
+  printf '   3. Ask: "List three files in my Drive folder Graywing Ag Systems (Demo Data)."\n'
+  printf '   4. Build your agent: Agents > + Create agent; for its data, add \033[1mGoogle Drive\033[0m.\n'
+  printf '      \033[2m(No Authorize? Use the Graywing demo data data store instead; it needs no sign-in.)\033[0m\n\n'
 else
   printf '   2. Ask: "What does Graywing Ag Systems sell, and who are its biggest customers?" (no sign-in step needed)\n'
   printf '   3. Build your agent: Agents > + Create agent; for its data, pick the \033[1mGraywing demo data\033[0m data store.\n\n'
