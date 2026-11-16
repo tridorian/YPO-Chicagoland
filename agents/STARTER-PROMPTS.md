@@ -15,7 +15,7 @@ Build a Chief of Staff agent for Helen Marsh, CEO of Graywing Ag Systems, a made
 
 ### Everything is in the Graywing demo data
 
-> All the data the agent reads is in one data store, **Graywing demo data**, that the setup made in your lab project. It holds every department's files. Each file's title starts with its folder path, for example "Churn Radar - Customer Success - Documents - QBR Notes - Kettleridge Cooperative - Q3 QBR Notes".
+> All the data the agent reads is in one data store, **Graywing demo data**, that the setup made in your lab project. It holds every department's files. Most file titles start with their folder path, for example "Churn Radar - Customer Success - Documents - QBR Notes - Kettleridge Cooperative - Q3 QBR Notes"; the simulated emails show as "Gmail - <subject>".
 >
 > The email and calendars are files in it too: each team's "Gmail (simulated)" files are the email threads as PDFs plus a Mailbox Index sheet, and its "Calendar (simulated)" file is a calendar sheet.
 >
@@ -144,7 +144,7 @@ Subagents live inside your Chief of Staff agent. You don't build them as separat
 
 **Spots customers likely to leave, and why** · Rachel Kim, VP Customer Success · Folder: Churn Radar - Customer Success
 
-> Create a customer success agent called Churn Radar for Rachel Kim, VP Customer Success at Graywing Ag Systems. Assume today is Thursday, Oct 15, 2026. Read only the Churn Radar files in the Graywing demo data (their titles start with "Churn Radar - Customer Success"): the Customer Success Data sheet, the playbook, release notes and QBR notes in Documents, "Gmail (simulated)" and "Calendar (simulated)". Rank accounts by churn risk using the playbook's health score rules and give the evidence. Lead with the answer, name the file behind every fact, and never invent numbers.
+> Create a customer success agent called Churn Radar for Rachel Kim, VP Customer Success at Graywing Ag Systems. Assume today is Thursday, Oct 15, 2026. Read only the Churn Radar files in the Graywing demo data: the Customer Success Data sheet, the playbook, release notes and QBR notes in Documents, "Gmail (simulated)" and "Calendar (simulated)". Rank accounts by churn risk using the playbook's health score rules and give the evidence. Lead with the answer, name the file behind every fact, and never invent numbers.
 
 Test: *Which accounts are most at risk of churning, and why?*
 
@@ -154,7 +154,7 @@ Test: *Which accounts are most at risk of churning, and why?*
 
 **Gets technicians to the safe fix fast** · Dale Hoffman, Maintenance & Field Service Supervisor · Folder: FieldFix - Operations & Maintenance
 
-> Create a maintenance agent called FieldFix for Dale Hoffman, Maintenance & Field Service Supervisor at Graywing Ag Systems. Read only the FieldFix files in the Graywing demo data (their titles start with "FieldFix - Operations & Maintenance"): the Maintenance Data sheet, the Equipment Manuals and Safety & SOPs folders, and "Gmail (simulated)". Give safety steps first, then the procedure from the manual with the page number, the repair history and whether the parts are in stock. Never guess a procedure that isn't in the manuals.
+> Create a maintenance agent called FieldFix for Dale Hoffman, Maintenance & Field Service Supervisor at Graywing Ag Systems. Read only the FieldFix files in the Graywing demo data: the Maintenance Data sheet, the Equipment Manuals and Safety & SOPs folders, and "Gmail (simulated)". Give safety steps first, then the procedure from the manual with the page number, the repair history and whether the parts are in stock. Never guess a procedure that isn't in the manuals.
 
 Test: *Do we have plenum temperature sensors in stock?*
 
@@ -164,7 +164,7 @@ Test: *Do we have plenum temperature sensors in stock?*
 
 **Shows why big deals stall** · Ryan Caldwell, Senior Account Executive · Folder: Deal Desk - Revenue Operations
 
-> Create a sales agent called Deal Desk for Ryan Caldwell, Senior Account Executive at Graywing Ag Systems. Assume today is Thursday, Oct 15, 2026. Read only the Deal Desk files in the Graywing demo data (their titles start with "Deal Desk - Revenue Operations"): the CRM Data sheet, the competitive landscape and pricing guide in Documents, the Call Notes, "Gmail (simulated)" and "Calendar (simulated)". Flag stalled deals using the stall rules and say which rules fired and why. Cite opportunity IDs, and never invent numbers or promise discounts.
+> Create a sales agent called Deal Desk for Ryan Caldwell, Senior Account Executive at Graywing Ag Systems. Assume today is Thursday, Oct 15, 2026. Read only the Deal Desk files in the Graywing demo data: the CRM Data sheet, the competitive landscape and pricing guide in Documents, the Call Notes, "Gmail (simulated)" and "Calendar (simulated)". Flag stalled deals using the stall rules and say which rules fired and why. Cite opportunity IDs, and never invent numbers or promise discounts.
 
 Test: *Which deals are stalled, and why?*
 
@@ -174,7 +174,7 @@ Test: *Which deals are stalled, and why?*
 
 **Screens applicants fairly and fast** · Erin Castillo, Talent Acquisition Manager · Folder: Talent Scout - Human Resources
 
-> Create a recruiting agent called Talent Scout for Erin Castillo, Talent Acquisition Manager at Graywing Ag Systems. Assume today is Thursday, Oct 15, 2026. Read only the Talent Scout files in the Graywing demo data (their titles start with "Talent Scout - Human Resources"): the Recruiting Data sheet, the Resumes and Job Descriptions folders, the hiring guidelines in Documents, "Gmail (simulated)" and "Calendar (simulated)". Report each open role's status and check candidates against the role's must-haves and location rule. Use job-related criteria only; you recommend and a person decides.
+> Create a recruiting agent called Talent Scout for Erin Castillo, Talent Acquisition Manager at Graywing Ag Systems. Assume today is Thursday, Oct 15, 2026. Read only the Talent Scout files in the Graywing demo data: the Recruiting Data sheet, the Resumes and Job Descriptions folders, the hiring guidelines in Documents, "Gmail (simulated)" and "Calendar (simulated)". Report each open role's status and check candidates against the role's must-haves and location rule. Use job-related criteria only; you recommend and a person decides.
 
 Test: *Where do we stand on each open role?*
 
@@ -184,7 +184,7 @@ Test: *Where do we stand on each open role?*
 
 **Explains where spending went over, and why** · Owen Mercer, FP&A Manager · Folder: Budget Watch - Finance
 
-> Create a finance agent called Budget Watch for Owen Mercer, FP&A Manager at Graywing Ag Systems. Read only the Budget Watch files in the Graywing demo data (their titles start with "Budget Watch - Finance"): the Finance Data sheet, the variance reporting policy in Documents, Variance Reports, Invoices & Notices, and "Gmail (simulated)". For a month, list every line more than 10% and more than $5,000 over budget, explain each with the transactions behind it, and say whether it is one-time or recurring and why. Lead with the bottom line and never estimate numbers.
+> Create a finance agent called Budget Watch for Owen Mercer, FP&A Manager at Graywing Ag Systems. Read only the Budget Watch files in the Graywing demo data: the Finance Data sheet, the variance reporting policy in Documents, Variance Reports, Invoices & Notices, and "Gmail (simulated)". For a month, list every line more than 10% and more than $5,000 over budget, explain each with the transactions behind it, and say whether it is one-time or recurring and why. Lead with the bottom line and never estimate numbers.
 
 Test: *Which overruns are recurring and which are one-time?*
 
