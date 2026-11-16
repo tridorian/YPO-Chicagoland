@@ -527,7 +527,7 @@ fi
 log "######## upload-my-files finished in $(elapsed) (rc=$RC): $FOLDER_URL"
 line="  ════════════════════════════════════════════════════════════════════════"
 printf '\n\033[32m%s\033[0m\n' "$line"
-printf '   \033[1mYOUR UPLOADS FOLDER IN GOOGLE DRIVE\033[0m  (a copy to open; your agent reads the My uploads data store)\n'
+printf '   \033[1mYOUR UPLOADS FOLDER IN GOOGLE DRIVE\033[0m  (your agent reads this folder through Google Drive)\n'
 printf '   \033[4;36m%s\033[0m\n' "$FOLDER_URL"
 printf '\033[32m%s\033[0m\n\n' "$line"
 if [ "$LOCAL" = "-" ]; then
@@ -537,8 +537,9 @@ if [ "$LOCAL" = "-" ]; then
   printf '   3. Run \033[1m%s\033[0m again.\n\n' "$ME"
   printf '   \033[2mFor a one-off question you can also attach a file straight in the chat.\033[0m\n\n'
 else
-  printf '   Next: in your Chief of Staff agent, add the \033[1mMy uploads\033[0m data store as a data source,\n'
-  printf '   then tell it: Also use the files in My uploads.\n\n'
+  printf '   Next: tell your Chief of Staff agent (Google Drive as its data):\n'
+  printf '   Also read the My Uploads folder in my Drive, and mark facts from it as (my upload).\n'
+  printf '   \033[2m(Using the data stores instead of Drive? Add the My uploads data store to the agent.)\033[0m\n\n'
 fi
 printf '   \033[2mLinks saved in %s · full log in %s\033[0m\n\n' "$WORK/links.txt" "$LOG"
 exit "$RC"

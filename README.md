@@ -9,7 +9,7 @@ Everything you need to set up a Gemini Enterprise app over the demo data for **G
 | `graywing-demo-data.zip` | The demo data: 124 files (spreadsheets, documents, manuals, simulated email and calendar printouts, test photos) in one folder per team. The setup script downloads this file; nothing else in the repo is part of the data. |
 | `setup/PASTE-INTO-CLOUD-SHELL.txt` | The setup script, ready to paste into Cloud Shell. |
 | `setup/graywing-setup.sh` | The same script as a plain file. |
-| `setup/upload-my-files.sh` | Loads your own files from Cloud Shell into the **My uploads** data store, so your agent can read them (and copies them to the **My Uploads** folder in your Drive to view). The setup installs it for you as `upload-my-files`. |
+| `setup/upload-my-files.sh` | Copies your own files from Cloud Shell into the **My Uploads** folder in your Drive, where your agent reads them (and into the **My uploads** data store, the no-sign-in fallback). The setup installs it for you as `upload-my-files`. |
 | `agents/STARTER-PROMPTS.md` | Build the Chief of Staff: the starter prompt, five test questions, rounds 2-3 to improve it, and a "go faster" section that adds the other five agents as subagents. |
 | `agents/ANSWER-KEY.md` | Each test question, what a good answer roughly says, and what makes it wrong. |
 | `agents/BRING-YOUR-OWN-FILES.md` | How to use your own documents with your agent. |
@@ -29,13 +29,14 @@ Your lab project already has a Gemini Enterprise app. The setup connects it to t
      ```
    - **Paste:** copy the whole of `setup/PASTE-INTO-CLOUD-SHELL.txt` into Cloud Shell and press Enter.
 3. Watch the steps finish. The script:
-   - creates two data stores in your lab project and links them to your app: **Graywing demo data** (Graywing's 111 documents, spreadsheets and slide decks; the test photos aren't included) and **My uploads** (empty, for your own files). Your agent reads from these.
-   - turns on Google Search, image generation, Canvas, every model your lab can use (it tests each one and switches off any the free trial doesn't include), and the no-code agent builder
-   - copies the demo data into your My Drive under **Graywing Ag Systems (Demo Data)**, and makes an empty **My Uploads** folder. These are only for you to open and browse the files; the agent doesn't read Drive.
+   - copies the demo data into your My Drive under **Graywing Ag Systems (Demo Data)**, and makes an empty **My Uploads** folder for your own files. Your agent reads these through Google Drive.
+   - connects **Google Drive** to your app (search and file actions), so answers link to the real Drive files
+   - also creates two data stores, **Graywing demo data** (Graywing's 111 documents, spreadsheets and slide decks) and **My uploads**. The lab's app needs them linked, and they're the fallback if Google Drive won't authorize; your agent doesn't use them otherwise.
+   - turns on Google Search for the main chat, image generation, Canvas, the no-code agent builder and the models your lab can use (the newest Gemini 4 models and Claude are switched off: they don't work in the lab)
 
    The green box at the end shows your **app link**, your **Drive folder link** and your **My Uploads link**. To see them again later, run `cat ~/graywing-lab/links.txt`.
-4. Open the app link. There's nothing to connect or authorize. In the chat, ask *"Using the Graywing demo data, what does Graywing Ag Systems sell?"* The answer should name Graywing files (step 0 of the starter prompts). If it says it can't find anything, wait a few minutes and ask again.
-5. Ask: *"What does Graywing Ag Systems sell, and who are its biggest customers?"*
+4. Open the app link, go to **Connectors** and click **Authorize** on **Google Drive**, signed in as your lab account. If it says "Data connector is not ready yet", wait a few minutes, refresh and try again.
+5. In the chat, ask *"List three files in my Drive folder Graywing Ag Systems (Demo Data)."* The answer should name Graywing files, each a link to Drive (step 0 of the starter prompts).
 
 It's safe to run the script again: it reuses what's already there and never duplicates files. A full log is in `~/graywing-lab/setup.log`.
 
@@ -50,9 +51,10 @@ It's safe to run the script again: it reuses what's already there and never dupl
 
 ## Good to know
 
-- **Facts come from the files; you do the sending.** Graywing's email and calendars are files too: the "Gmail (simulated)" and "Calendar (simulated)" files in the Graywing demo data. The agent reads them like any other file. It can't send email, save drafts, add calendar events or create files: it writes the email, invite, memo or table in the chat (or in Canvas), and you copy it into Gmail, Calendar, Docs, Slides or Sheets yourself.
-- **Google Search is on** for outside context (markets, prices, news). Company facts should always come from the Graywing files; ask the agent to say which is which.
+- **Your agent reads only Google Drive.** In the agent builder, add Google Drive as its one data source, turn Google Search off and leave the data stores off. Every fact then comes from the Graywing files, with a link to the file.
+- **Facts come from the files; you do the sending.** Graywing's email and calendars are files too: the "Gmail (simulated)" and "Calendar (simulated)" folders in the Drive folder. The agent reads them like any other file. It doesn't send email, add calendar events or change files: it writes the email, invite, memo or table in the chat (or in Canvas), and you copy it into Gmail, Calendar, Docs, Slides or Sheets yourself.
+- **Google Search** is on in the main chat for outside context (markets, prices, news), and off in your agent.
 - The data is set around **Thursday, Oct 15, 2026**. Answers that count days ("41 days to renewal") assume that date.
-- The two data stores live in your own lab project, so each person's agent sees only their own copy of the data and their own uploads. The copy in your Drive is just for you to open the files; changing it doesn't change what the agent reads.
+- Each person's Drive copy belongs to their own lab account, so each agent sees only that person's copy and uploads.
 - Your lab account is temporary: anything you upload or create goes away when the lab ends.
-- *Facilitators:* running the setup with `WITH_ACTIONS=1` also connects the Google Drive, Gmail and Calendar connectors with actions. Each person has to Authorize them, and that step failed in our Qwiklabs test, so leave it off for participants.
+- *Facilitators:* `NO_DRIVE=1` skips the Google Drive connector (data stores only, no Authorize step; sources aren't clickable). `WITH_ACTIONS=1` also connects Gmail and Google Calendar (untested in the lab).

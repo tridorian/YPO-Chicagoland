@@ -692,7 +692,7 @@ printf '   \033[4;36m%s\033[0m\n\n' "$WEB_URL"
 printf '   \033[1mGRAYWING DEMO DATA IN YOUR GOOGLE DRIVE\033[0m  (to open the files yourself)\n'
 printf '   \033[4;36m%s\033[0m\n\n' "$DRIVE_URL"
 if [ -n "$UPLOADS_URL" ]; then
-  printf '   \033[1mMY UPLOADS\033[0m  (your own files: run upload-my-files; it fills this folder and the My uploads data store)\n'
+  printf '   \033[1mMY UPLOADS\033[0m  (your own files: drag them into this folder; your agent reads it through Google Drive)\n'
   printf '   \033[4;36m%s\033[0m\n\n' "$UPLOADS_URL"
 fi
 if [ "${#TURNED_ON[@]}" -gt 0 ]; then
@@ -708,12 +708,13 @@ if [ -n "$CONNECTED_NAMES" ]; then
   printf '   2. Click \033[1mConnectors\033[0m and \033[1mAuthorize\033[0m %s.\n' "$CONNECTED_NAMES"
   printf '      If it says "Data connector is not ready yet", wait a few minutes, refresh the page and try again.\n'
   printf '   3. Ask: "List three files in my Drive folder Graywing Ag Systems (Demo Data)."\n'
-  printf '   4. Build your agent: Agents > + Create agent; for its data, add \033[1mGoogle Drive\033[0m.\n'
+  printf '   4. Build your agent: Agents > + Create agent; for its data, add only \033[1mGoogle Drive\033[0m\n'
+  printf '      (turn Google Search off and leave the data stores off).\n'
   printf '      \033[2m(No Authorize? Use the Graywing demo data data store instead; it needs no sign-in.)\033[0m\n\n'
 else
   printf '   2. Ask: "What does Graywing Ag Systems sell, and who are its biggest customers?" (no sign-in step needed)\n'
   printf '   3. Build your agent: Agents > + Create agent; for its data, pick the \033[1mGraywing demo data\033[0m data store.\n\n'
 fi
-printf '   Your own files: put them in ~/my-files, then run \033[1mupload-my-files\033[0m (new terminal tabs find it;\n'
-printf '   in this one, run  export PATH="$HOME/bin:$PATH"  first).\n'
+printf '   Your own files: drag them into the My Uploads folder above, or put them in ~/my-files and run\n'
+printf '   \033[1mupload-my-files\033[0m (new terminal tabs find it; in this one, run  export PATH="$HOME/bin:$PATH"  first).\n'
 printf '   Show the links again any time with:  cat %s\n\n' "$WORK/links.txt"
