@@ -1,8 +1,8 @@
 cat > ~/graywing-setup.sh <<'GRAYWING_SETUP_EOF'
 #!/usr/bin/env bash
 # Graywing Ag Systems - Gemini Enterprise lab setup. Run in Cloud Shell of a fresh Qwiklabs project.
-# Steps: project -> APIs -> find the lab's Gemini Enterprise app -> connect Google Drive, Gmail and Google Calendar
-# (search + actions) -> turn on app features, all models and Google Search -> Drive access check ->
+# Steps: project -> APIs -> find the lab's Gemini Enterprise app -> connect Google Drive (search; WITH_ACTIONS=1 adds
+# Gmail, Calendar and actions) -> turn on app features, the models the lab can use and Google Search -> Drive check ->
 # install the upload-my-files command -> copy the demo data into your My Drive (emails and calendars are simulated
 # as files there) and make an empty "My Uploads" folder -> wait for the connectors, print your links.
 # Safe to re-run: every step reuses earlier work and only changes what is missing.
@@ -178,11 +178,20 @@ else
 fi
 
 # ---- 4. connectors ---------------------------------------------------------------------------------------
-step "Connecting Google Drive, Gmail and Google Calendar"
-# Federated (each person's own Drive, mail and calendar are searched live; nothing is copied) plus actions
-# (create files, send or draft email, add events). Google runs the sign-in: each user clicks Authorize once in the app.
-CONNECTORS=("google_drive|$CONNECTOR_PREFIX-drive|Google Drive" "google_mail|$CONNECTOR_PREFIX-gmail|Gmail"
-            "google_calendar|$CONNECTOR_PREFIX-calendar|Google Calendar")
+# Default: Google Drive only, search only (federated: each person's own Drive is searched live; nothing is copied).
+# This is what the original Graywing lab did, and the one connector lab accounts can authorize. Gmail, Google
+# Calendar and actions (create files, draft email, add events) are opt-in: WITH_ACTIONS=1. Google runs the
+# sign-in: each user clicks Authorize once in the app.
+if [ "${WITH_ACTIONS:-0}" = 1 ]; then
+  step "Connecting Google Drive, Gmail and Google Calendar"
+  CONNECTORS=("google_drive|$CONNECTOR_PREFIX-drive|Google Drive" "google_mail|$CONNECTOR_PREFIX-gmail|Gmail"
+              "google_calendar|$CONNECTOR_PREFIX-calendar|Google Calendar")
+  MODES='["FEDERATED","ACTIONS"]'; CONNECTED="Google Drive, Gmail, Google Calendar (search + actions)"; CONNECTED_NAMES="Google Drive, Gmail and Google Calendar"
+else
+  step "Connecting Google Drive"
+  CONNECTORS=("google_drive|$CONNECTOR_PREFIX-drive|Google Drive")
+  MODES='["FEDERATED"]'; CONNECTED="Google Drive (search)"; CONNECTED_NAMES="Google Drive"
+fi
 body() {  # body MODES_JSON -> setUpDataConnector request for $SRC_NAME / $CID / $CNAME
   printf '{"collectionId":"%s","collectionDisplayName":"%s","dataConnector":{"dataSource":"%s","refreshInterval":"0s","connectorModes":%s,"entities":[{"entityName":"%s"}],"params":{}}}' \
     "$CID" "$CNAME" "$SRC_NAME" "$1" "$SRC_NAME"
@@ -194,8 +203,8 @@ for c in "${CONNECTORS[@]}"; do
   url="$NBASE/collections/$CID/dataConnector"
   api GET "$url"
   if [ "$CODE" = 404 ]; then
-    api POST "$BASE:setUpDataConnector" "$(body '["FEDERATED","ACTIONS"]')"
-    if [ "$CODE" != 200 ]; then
+    api POST "$BASE:setUpDataConnector" "$(body "$MODES")"
+    if [ "$CODE" != 200 ] && [ "$MODES" != '["FEDERATED"]' ]; then
       log "connector with actions refused; trying search only"
       api POST "$BASE:setUpDataConnector" "$(body '["FEDERATED"]')"
       [ "$CODE" = 200 ] || die "Could not create the $CNAME connector ($CODE): $(err)"
@@ -204,9 +213,12 @@ for c in "${CONNECTORS[@]}"; do
     for _ in $(seq 20); do api GET "$url"; [ -n "$(jv 'd["entities"][0]["dataStore"]')" ] && break; sleep 3; done
     ok "$CNAME connector created ($(jv 'd.get("state","starting")' | tr 'A-Z' 'a-z'); it finishes starting in the background)"
   elif [ "$CODE" = 200 ]; then
-    if [ "$(jv '"ACTIONS" in d.get("connectorModes",[])')" != "True" ]; then
-      api PATCH "$url?updateMask=connectorModes" '{"connectorModes":["FEDERATED","ACTIONS"]}'
-      if [ "$CODE" = 200 ]; then api GET "$url"; else NO_ACTIONS+=("$CNAME"); fi
+    # bring an existing connector to the wanted modes (an earlier run may have switched actions on)
+    if [ "$(jv 'json.dumps(sorted(d.get("connectorModes",[])))')" != "$(jv 'json.dumps(sorted(d))' "$MODES")" ]; then
+      api PATCH "$url?updateMask=connectorModes" "{\"connectorModes\":$MODES}"
+      if [ "$CODE" = 200 ]; then api GET "$url"
+      elif [ "$MODES" != '["FEDERATED"]' ]; then NO_ACTIONS+=("$CNAME"); api GET "$url"
+      else warn "Could not switch $CNAME to search only ($CODE): $(err)"; api GET "$url"; fi
     fi
     ok "$CNAME connector: $(jv 'd.get("state","")' | tr 'A-Z' 'a-z')"
   else
@@ -229,9 +241,27 @@ attach() {  # adds the connectors' data stores to the app, keeping anything alre
   local have ids
   have="$(jv 'json.dumps(d.get("dataStoreIds", []))' | sed 's/^$/[]/')"
   ids="$(jv "json.dumps(d.get('dataStoreIds', []) + [x for x in $DS_JSON if x not in d.get('dataStoreIds', [])])")"
-  [ "$ids" = "$have" ] && { ATTACHED=1; return 0; }
-  api PATCH "$ENGINE?updateMask=dataStoreIds" "{\"dataStoreIds\":$ids}"
-  [ "$CODE" = 200 ] && { ATTACHED=1; ATTACH_MSG="Connectors added to"; }
+  if [ "$ids" != "$have" ]; then
+    api PATCH "$ENGINE?updateMask=dataStoreIds" "{\"dataStoreIds\":$ids}"
+    [ "$CODE" = 200 ] || return 1
+    ATTACH_MSG="Connectors added to"; have="$ids"
+  fi
+  ATTACHED=1
+  # Drive only: take off the Gmail / Calendar connectors an earlier run of this setup added (people can't
+  # authorize them in the lab). An app that has several data stores must keep at least two, so this can fail.
+  if [ "${WITH_ACTIONS:-0}" != 1 ]; then
+    local extra keep
+    extra="$(P="$CONNECTOR_PREFIX" jv "' '.join(x for x in json.loads('$have') if x.startswith((__import__('os').environ['P'] + '-gmail_', __import__('os').environ['P'] + '-calendar_')))" '{}')"
+    if [ -n "$extra" ]; then
+      keep="$(P="$CONNECTOR_PREFIX" jv "json.dumps([x for x in json.loads('$have') if not x.startswith((__import__('os').environ['P'] + '-gmail_', __import__('os').environ['P'] + '-calendar_'))])" '{}')"
+      api PATCH "$ENGINE?updateMask=dataStoreIds" "{\"dataStoreIds\":$keep}"
+      if [ "$CODE" = 200 ]; then info "Took the Gmail and Google Calendar connectors off the app (Google Drive is all you need)."
+      else
+        info "Gmail and Google Calendar stay listed under Connectors (the app can't drop them: $(err))."
+        info "You don't need to authorize them; the agent reads the simulated email and calendars from Drive."
+      fi
+    fi
+  fi
 }
 if [ -n "$NEW_APP" ]; then
   api POST "$BASE/collections/default_collection/engines?engineId=$APP_ID" "{
@@ -247,7 +277,7 @@ if [ -n "$NEW_APP" ]; then
   if [ "$(jv 'd.get("done", False)')" != "True" ]; then
     spin "Creating the app" wait_op "$OP" || die "App creation did not finish (see $LOG)."
   fi
-  ok "App created: $APP_NAME (Google Drive, Gmail and Google Calendar connected)"
+  ok "App created: $APP_NAME ($CONNECTED_NAMES connected)"
   ATTACHED=1
 else
   attach
@@ -257,7 +287,7 @@ else
     info "The app doesn't take the new connectors yet; trying again once they are active (last step)."
   fi
 fi
-if [ "${#NO_ACTIONS[@]}" = 0 ]; then
+if [ "${WITH_ACTIONS:-0}" = 1 ] && [ "${#NO_ACTIONS[@]}" = 0 ]; then
   info "Actions (create files, send or draft email, add events) are switched on. To review or pick them:"
   info "console > Gemini Enterprise > Data stores > (Google Drive / Gmail / Google Calendar) > Actions."
 fi
@@ -978,7 +1008,9 @@ connectors_ready() {  # 0 = all active, 1 = still starting, 3 = one failed
       FAILED|INITIALIZATION_FAILED) return 3 ;;
       *) rc=1 ;;
     esac
-    case "$(jv 'd.get("actionState","")')" in CREATING|UPDATING|RUNNING) rc=1 ;; esac
+    if [ "${WITH_ACTIONS:-0}" = 1 ]; then
+      case "$(jv 'd.get("actionState","")')" in CREATING|UPDATING|RUNNING) rc=1 ;; esac
+    fi
   done
   return $rc
 }
@@ -991,7 +1023,7 @@ for c in "${CONNECTORS[@]}"; do
   api GET "$NBASE/collections/$CID/dataConnector"
   ST="$(jv 'd.get("state","")')"; AST="$(jv 'd.get("actionState","")')"
   if [ "$ST" = ACTIVE ]; then
-    ok "$CNAME connector: active$([ "$AST" = ACTIVE ] && echo ', actions active')"
+    ok "$CNAME connector: active$([ "${WITH_ACTIONS:-0}" = 1 ] && [ "$AST" = ACTIVE ] && echo ', actions active')"
   elif [ "$ST" = FAILED ] || [ "$ST" = INITIALIZATION_FAILED ]; then
     warn "$CNAME connector failed: $(jv 'd.get("errors","")'). Delete it under Gemini Enterprise > Data stores and paste the script again."
   else
@@ -1025,14 +1057,15 @@ if [ -n "$UPLOADS_URL" ]; then
 fi
 if [ "${#TURNED_ON[@]}" -gt 0 ]; then
   printf '   \033[1mTurned on:\033[0m %s\n' "$(printf '%s, ' "${TURNED_ON[@]}" | sed 's/, $//')"
-  printf '   \033[1mConnected:\033[0m Google Drive, Gmail, Google Calendar (search + actions)\n\n'
+  printf '   \033[1mConnected:\033[0m %s\n\n' "$CONNECTED"
 fi
 printf '   \033[2mAdmin console: %s\033[0m\n' "$CONSOLE_URL"
 printf '   \033[2mLinks saved in %s · full log in %s\033[0m\n' "$WORK/links.txt" "$LOG"
 printf '\033[32m%s\033[0m\n\n' "$line"
 printf '   \033[1mNext (once):\033[0m\n'
 printf '   1. Open the app link above (signed in as %s).\n' "$ACCOUNT"
-printf '   2. Click \033[1mConnectors\033[0m and \033[1mAuthorize\033[0m Google Drive, Gmail and Google Calendar.\n'
+printf '   2. Click \033[1mConnectors\033[0m and \033[1mAuthorize\033[0m %s.\n' "$CONNECTED_NAMES"
+printf '      If it says "Data connector is not ready yet", wait a few minutes and try again.\n'
 printf '   3. Ask: "What does Graywing Ag Systems sell, and who are its biggest customers?"\n\n'
 printf '   Your own files: put them in ~/my-files, then run \033[1mupload-my-files\033[0m (new terminal tabs find it;\n'
 printf '   in this one, run  export PATH="$HOME/bin:$PATH"  first).\n'
