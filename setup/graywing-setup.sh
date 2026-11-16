@@ -314,6 +314,15 @@ set_models() {  # set_models "id id ..." [MODEL_ENABLED|MODEL_DISABLED] -> merge
   api PATCH "$ENGINE?updateMask=modelConfigs" "$cfg"
   [ "$CODE" = 200 ]
 }
+model_answers() {  # model_answers MODEL_ID -> 0 if a one-word test question gets an answer; else $why says why
+  api POST "$ENGINE/assistants/default_assistant:streamAssist" \
+    "{\"query\":{\"text\":\"Reply with the single word OK.\"},\"generationSpec\":{\"modelId\":\"$1\"}}"
+  # errors can come back as the HTTP status or inside a 200 stream (a JSON list of chunks)
+  why="$(jv 'next((str(e["error"].get("message") or e["error"].get("status") or "error") for e in (d if isinstance(d, list) else [d]) if isinstance(e, dict) and e.get("error")), "")')"
+  [ "$CODE" = 200 ] && [ -z "$why" ] && return 0
+  [ -n "$why" ] || why="HTTP $CODE"
+  return 1
+}
 if [ -z "$MODELS" ]; then
   warn "Could not read the list of models; turn them on under Configurations > Feature Management."
 else
@@ -324,34 +333,52 @@ else
   api GET "$ENGINE"
   ON="$(WANT="$MODELS" jv '" ".join(m for m in __import__("os").environ["WANT"].split() if (d.get("modelConfigs") or {}).get(m) == "MODEL_ENABLED")')"
   OFF="$(WANT="$MODELS" jv '" ".join(m for m in __import__("os").environ["WANT"].split() if (d.get("modelConfigs") or {}).get(m) != "MODEL_ENABLED")')"
-  ok "Models on ($(wc -w <<<"$ON" | tr -d ' ')): $ON"
-  [ -n "$OFF" ] && warn "Models not switched on: $OFF"
-  TURNED_ON+=("$(wc -w <<<"$ON" | tr -d ' ') models")
-  CLAUDE="$(printf '%s\n' $ON | grep '^claude' | head -1)"
-  if [ -n "$CLAUDE" ]; then  # one tiny test question tells whether Claude can answer yet (it needs pay-as-you-go)
-    api POST "$ENGINE/assistants/default_assistant:streamAssist" \
-      "{\"query\":{\"text\":\"Reply with the single word OK.\"},\"generationSpec\":{\"modelId\":\"$CLAUDE\"}}"
-    if [ "$CODE" = 200 ]; then
-      ok "Claude models answer (pay-as-you-go is on for this project)"
-      TURNED_ON+=("Claude")
-    else
-      case "$BODY" in *OVERAGE*) why="it needs pay-as-you-go usage, which this lab's trial doesn't include" ;;
-        *) why="$(err)" ;; esac
-      CLAUDE_ALL="$(printf '%s\n' $ON | grep '^claude' | tr '\n' ' ')"
-      if [ "${KEEP_CLAUDE:-0}" = 1 ]; then
-        warn "Claude models are switched on but can't answer yet: $why. Leaving them on (KEEP_CLAUDE=1)."
-        TURNED_ON[${#TURNED_ON[@]}-1]+=" (Claude needs pay-as-you-go)"
-      elif set_models "$CLAUDE_ALL" MODEL_DISABLED; then
-        # left on, "Auto" model choice can route to Claude and answers stop half-way with CLAUDE_OVERAGE_REQUIRED
-        warn "Claude can't answer here yet ($why), so the Claude models are switched off again; the Gemini models are on."
-        TURNED_ON[${#TURNED_ON[@]}-1]="$(( $(wc -w <<<"$ON") - $(wc -w <<<"$CLAUDE_ALL") )) models (Gemini; Claude off: needs pay-as-you-go)"
-      else
-        warn "Claude can't answer yet ($why) and could not be switched off ($CODE). Pick a Gemini model instead of Auto."
-      fi
-      info "To use Claude, with billing: console > Gemini Enterprise > Apps > ${APP_TITLE:-$APP_ID} > Configurations >"
-      info "Feature Management > Enable third-party models > switch Claude on > Go to Usage & spend (turn on pay-as-you-go)"
-      info "> Agree to the terms > Save, then run this setup again."
+  [ -n "$OFF" ] && warn "Models the app would not switch on: $OFF"
+  # 5b-2. Some listed models can't answer in this project: the free trial blocks some Gemini models
+  #       ("not available during the free trial") and Claude needs pay-as-you-go (CLAUDE_OVERAGE_REQUIRED).
+  #       Left on, they show in the model picker and "Auto" can route to them, so answers fail. Ask each model
+  #       a one-word question and switch off the ones that say they are not available here.
+  info "Asking each of the $(wc -w <<<"$ON" | tr -d ' ') models a one-word test question to see which ones this lab can use..."
+  WORKS=(); BROKEN=(); NOTES=(); UNSURE=(); NEED_PAYG=0; NEED_PAID=0
+  for m in $ON; do
+    verdict=""
+    for try in 1 2; do
+      if model_answers "$m"; then verdict=works; break; fi
+      case "$why $BODY" in
+        *"free trial"*) verdict=broken; short="not in the free trial"; NEED_PAID=1; break ;;
+        *OVERAGE*|*overage*|*"pay-as-you-go"*) verdict=broken; short="needs pay-as-you-go"; NEED_PAYG=1; break ;;
+        *FAILED_PRECONDITION*|*"not available"*|*"not supported"*|*PERMISSION_DENIED*) verdict=broken; short="${why:0:90}"; break ;;
+      esac
+      case "$CODE" in 400|403|404) verdict=broken; short="${why:0:90}"; break ;; esac
+      [ "$try" = 1 ] && sleep 5   # 429, 5xx or a time-out: maybe a blip, so ask once more before judging
+    done
+    if [ "$verdict" = works ]; then WORKS+=("$m")
+    elif [ "$verdict" = broken ] && [ "${KEEP_CLAUDE:-0}" = 1 ] && [[ "$m" == claude* ]]; then
+      WORKS+=("$m"); warn "$m can't answer yet ($short); leaving it on (KEEP_CLAUDE=1)."
+    elif [ "$verdict" = broken ]; then BROKEN+=("$m"); NOTES+=("$m: $short")
+    else UNSURE+=("$m"); WORKS+=("$m")
     fi
+  done
+  if [ "${#BROKEN[@]}" -gt 0 ] && [ "${#WORKS[@]}" = 0 ]; then
+    warn "No model answered the test question (last error: ${why:0:120}); leaving the models as they are."
+    WORKS=($ON); BROKEN=()
+  elif [ "${#BROKEN[@]}" -gt 0 ]; then
+    if set_models "${BROKEN[*]}" MODEL_DISABLED; then
+      warn "Switched off ${#BROKEN[@]} model(s) this lab can't use:"
+      for n in "${NOTES[@]}"; do info "  - $n"; done
+    else
+      warn "These models can't answer here and could not be switched off ($CODE). Don't pick them, and avoid Auto:"
+      for n in "${NOTES[@]}"; do info "  - $n"; done
+    fi
+  fi
+  [ "${#UNSURE[@]}" -gt 0 ] && warn "No clear answer from ${UNSURE[*]} (busy or slow?); left on. If one fails in chat, pick another model."
+  ok "Models on (${#WORKS[@]}): ${WORKS[*]}"
+  TURNED_ON+=("${#WORKS[@]} models")
+  [ "$NEED_PAID" = 1 ] && info "Models marked 'not in the free trial' need a paid Gemini Enterprise subscription; run this setup again after upgrading."
+  if [ "$NEED_PAYG" = 1 ]; then
+    info "To use Claude, with billing: console > Gemini Enterprise > Apps > ${APP_TITLE:-$APP_ID} > Configurations >"
+    info "Feature Management > Enable third-party models > switch Claude on > Go to Usage & spend (turn on pay-as-you-go)"
+    info "> Agree to the terms > Save, then run this setup again."
   fi
 fi
 
