@@ -177,33 +177,50 @@ else
 fi
 
 # ---- 4. connectors ---------------------------------------------------------------------------------------
-# Default: Google Drive only, search only (federated: each person's own Drive is searched live; nothing is copied).
-# This is what the original Graywing lab did, and the one connector lab accounts can authorize. Gmail, Google
-# Calendar and actions (create files, draft email, add events) are opt-in: WITH_ACTIONS=1. Google runs the
-# sign-in: each user clicks Authorize once in the app.
+# Default: Google Drive only (each person's own Drive is searched live; nothing is copied). People authorize it
+# once in the app. Gmail and Google Calendar are opt-in: WITH_ACTIONS=1. Google Drive is created in search +
+# actions mode: search-only Drive connectors now fail to start ("pipeline failure"), search + actions start fine.
+# The lab's ready-made app must keep at least two data stores linked, so in Drive-only mode an empty helper data
+# store ($CONNECTOR_PREFIX-notes, no sign-in needed) is linked as well.
+MODES='["FEDERATED","ACTIONS"]'
 if [ "${WITH_ACTIONS:-0}" = 1 ]; then
   step "Connecting Google Drive, Gmail and Google Calendar"
   CONNECTORS=("google_drive|$CONNECTOR_PREFIX-drive|Google Drive" "google_mail|$CONNECTOR_PREFIX-gmail|Gmail"
               "google_calendar|$CONNECTOR_PREFIX-calendar|Google Calendar")
-  MODES='["FEDERATED","ACTIONS"]'; CONNECTED="Google Drive, Gmail, Google Calendar (search + actions)"; CONNECTED_NAMES="Google Drive, Gmail and Google Calendar"
+  CONNECTED="Google Drive, Gmail, Google Calendar (search + actions)"; CONNECTED_NAMES="Google Drive, Gmail and Google Calendar"
 else
   step "Connecting Google Drive"
   CONNECTORS=("google_drive|$CONNECTOR_PREFIX-drive|Google Drive")
-  MODES='["FEDERATED"]'; CONNECTED="Google Drive (search)"; CONNECTED_NAMES="Google Drive"
+  CONNECTED="Google Drive"; CONNECTED_NAMES="Google Drive"
 fi
 body() {  # body MODES_JSON -> setUpDataConnector request for $SRC_NAME / $CID / $CNAME
   printf '{"collectionId":"%s","collectionDisplayName":"%s","dataConnector":{"dataSource":"%s","refreshInterval":"0s","connectorModes":%s,"entities":[{"entityName":"%s"}],"params":{}}}' \
     "$CID" "$CNAME" "$SRC_NAME" "$1" "$SRC_NAME"
 }
-CIDS=(); DS_IDS=(); NO_ACTIONS=()
+CIDS=(); DS_IDS=(); NO_ACTIONS=(); CHOSEN=()
 for c in "${CONNECTORS[@]}"; do
-  IFS='|' read -r SRC_NAME CID CNAME <<<"$c"
-  CIDS+=("$CID")
+  IFS='|' read -r SRC_NAME BASE_CID CNAME <<<"$c"
+  # A connector that failed to start can't be fixed, and a deleted one's id stays locked for hours: use the
+  # first of these ids that is healthy, or else the first that is free.
+  CANDS=("$BASE_CID"); [ "$SRC_NAME" = google_drive ] && CANDS+=("$CONNECTOR_PREFIX-gdrive")
+  CANDS+=("$BASE_CID-2" "$BASE_CID-3")
+  CID=""
+  for cand in "${CANDS[@]}"; do
+    api GET "$NBASE/collections/$cand/dataConnector"
+    if [ "$CODE" = 200 ]; then
+      case "$(jv 'd.get("state","")')" in
+        FAILED|INITIALIZATION_FAILED) log "connector $cand failed to start; trying the next id"; continue ;;
+        *) CID="$cand"; break ;;
+      esac
+    elif [ "$CODE" = 404 ]; then CID="$cand"; break
+    else die "Could not read the $CNAME connector ($CODE): $(err)"; fi
+  done
+  [ -n "$CID" ] || die "Every $CNAME connector id tried has failed. Set CONNECTOR_PREFIX=graywing2 and paste the script again."
+  CIDS+=("$CID"); CHOSEN+=("$SRC_NAME|$CID|$CNAME")
   url="$NBASE/collections/$CID/dataConnector"
-  api GET "$url"
   if [ "$CODE" = 404 ]; then
     api POST "$BASE:setUpDataConnector" "$(body "$MODES")"
-    if [ "$CODE" != 200 ] && [ "$MODES" != '["FEDERATED"]' ]; then
+    if [ "$CODE" != 200 ]; then
       log "connector with actions refused; trying search only"
       api POST "$BASE:setUpDataConnector" "$(body '["FEDERATED"]')"
       [ "$CODE" = 200 ] || die "Could not create the $CNAME connector ($CODE): $(err)"
@@ -211,24 +228,31 @@ for c in "${CONNECTORS[@]}"; do
     fi
     for _ in $(seq 20); do api GET "$url"; [ -n "$(jv 'd["entities"][0]["dataStore"]')" ] && break; sleep 3; done
     ok "$CNAME connector created ($(jv 'd.get("state","starting")' | tr 'A-Z' 'a-z'); it finishes starting in the background)"
-  elif [ "$CODE" = 200 ]; then
-    # bring an existing connector to the wanted modes (an earlier run may have switched actions on)
-    if [ "$(jv 'json.dumps(sorted(d.get("connectorModes",[])))')" != "$(jv 'json.dumps(sorted(d))' "$MODES")" ]; then
+  else
+    if [ "$(jv '"ACTIONS" in d.get("connectorModes",[])')" != "True" ]; then
       api PATCH "$url?updateMask=connectorModes" "{\"connectorModes\":$MODES}"
-      if [ "$CODE" = 200 ]; then api GET "$url"
-      elif [ "$MODES" != '["FEDERATED"]' ]; then NO_ACTIONS+=("$CNAME"); api GET "$url"
-      else warn "Could not switch $CNAME to search only ($CODE): $(err)"; api GET "$url"; fi
+      if [ "$CODE" = 200 ]; then api GET "$url"; else NO_ACTIONS+=("$CNAME"); api GET "$url"; fi
     fi
     ok "$CNAME connector: $(jv 'd.get("state","")' | tr 'A-Z' 'a-z')"
-  else
-    die "Could not read the $CNAME connector ($CODE): $(err)"
   fi
   DS="$(jv 'd["entities"][0]["dataStore"].split("/")[-1]')"
   [ -n "$DS" ] || die "The $CNAME connector has no data store yet. Paste the script again in a minute."
   DS_IDS+=("$DS")
 done
+CONNECTORS=("${CHOSEN[@]}")
+if [ "${WITH_ACTIONS:-0}" != 1 ]; then
+  NOTES_ID="$CONNECTOR_PREFIX-notes"
+  api GET "$BASE/collections/default_collection/dataStores/$NOTES_ID"
+  if [ "$CODE" = 404 ]; then
+    api POST "$BASE/collections/default_collection/dataStores?dataStoreId=$NOTES_ID" \
+      '{"displayName":"Graywing lab notes","industryVertical":"GENERIC","solutionTypes":["SOLUTION_TYPE_SEARCH"],"contentConfig":"CONTENT_REQUIRED"}'
+  fi
+  if [ "$CODE" = 200 ]; then DS_IDS+=("$NOTES_ID")
+  else warn "Could not make the helper data store ($CODE): $(err)"; fi
+fi
 DS_JSON="$(printf '%s\n' "${DS_IDS[@]}" | python3 -c 'import json,sys; print(json.dumps(sys.stdin.read().split()))')"
 for n in "${NO_ACTIONS[@]}"; do
+  [ "${WITH_ACTIONS:-0}" = 1 ] || break
   warn "$n: actions could not be switched on here (search works). To add them in the console: Gemini Enterprise >"
   info "Data stores > $n > Actions > Enable actions > tick the actions > Enable actions."
 done

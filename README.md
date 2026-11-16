@@ -29,7 +29,7 @@ Your lab project already has a Gemini Enterprise app. The setup connects it to t
      ```
    - **Paste:** copy the whole of `setup/PASTE-INTO-CLOUD-SHELL.txt` into Cloud Shell and press Enter.
 3. Watch the steps finish. The script:
-   - connects Google Drive to your app (search only)
+   - connects Google Drive to your app (and links an empty helper data store, which the lab's app needs; ignore it)
    - turns on Google Search, image generation, Canvas, every model your lab can use (it tests each one and switches off any the free trial doesn't include), and the no-code agent builder
    - copies the demo data into your My Drive under **Graywing Ag Systems (Demo Data)**, and makes an empty **My Uploads** folder for your own files
 
