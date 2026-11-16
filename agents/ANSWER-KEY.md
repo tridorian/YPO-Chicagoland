@@ -33,7 +33,7 @@ A good action also gives a real link. If a tool is missing or fails, the agent s
 | 5 | Canvas: mini web page | Canvas | Shows only the five lines and amounts in row 3. | any figure not in the files (invented totals, percentages or months), or "sample data". |
 | 6 | Image for the deck | Main chat, then Slides | A real image in the main chat, then added to slide 1 by hand. | the agent shows an image link or says it added the image to the deck. |
 | 7 | Outside context | Your agent, web search on | Web facts labelled outside context, with sources; Graywing facts from the files. | no label; a Graywing figure from the web; "search unavailable" (web search is off in the chat box). |
-| 8 | Compare models | Your agent | Both models give CS-1's facts; they differ in speed and length. | one drops facts or adds figures; an error mid-answer (pick another Gemini model, not Auto). |
+| 8 | Compare models | Your agent | Both models give CS-1's facts; they differ in speed and length. | one drops facts or adds figures; an error mid-answer (the model is not in the free trial: run the setup again, pick another model). |
 | 9 | Your own file | Your agent | Five bullets from your file, each marked (my upload). | facts not in your file; Graywing facts marked as yours. |
 
 ---

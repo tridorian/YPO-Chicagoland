@@ -343,15 +343,21 @@ else
   WORKS=(); BROKEN=(); NOTES=(); UNSURE=(); NEED_PAYG=0; NEED_PAID=0
   for m in $ON; do
     verdict=""
-    for try in 1 2; do
+    for try in 1 2 3; do
       if model_answers "$m"; then verdict=works; break; fi
+      # "Model X is disabled." right after switching it on: the change hasn't reached the chat yet, so wait
+      case "$why" in *"is disabled"*) if [ "$try" -lt 3 ]; then sleep 10; continue; fi ;; esac
       case "$why $BODY" in
         *"free trial"*) verdict=broken; short="not in the free trial"; NEED_PAID=1; break ;;
         *OVERAGE*|*overage*|*"pay-as-you-go"*) verdict=broken; short="needs pay-as-you-go"; NEED_PAYG=1; break ;;
-        *FAILED_PRECONDITION*|*"not available"*|*"not supported"*|*PERMISSION_DENIED*) verdict=broken; short="${why:0:90}"; break ;;
+        *FAILED_PRECONDITION*|*"not available"*|*"not supported"*|*PERMISSION_DENIED*|*"is disabled"*) verdict=broken ;;
       esac
-      case "$CODE" in 400|403|404) verdict=broken; short="${why:0:90}"; break ;; esac
-      [ "$try" = 1 ] && sleep 5   # 429, 5xx or a time-out: maybe a blip, so ask once more before judging
+      case "$CODE" in 400|403|404) verdict=broken ;; esac
+      if [ "$verdict" = broken ]; then
+        if [[ "$m" == claude* ]]; then short="needs pay-as-you-go"; NEED_PAYG=1; else short="${why:0:90}"; fi
+        break
+      fi
+      [ "$try" -lt 3 ] && sleep 5   # 429, 5xx or a time-out: maybe a blip, so ask again before judging
     done
     if [ "$verdict" = works ]; then WORKS+=("$m")
     elif [ "$verdict" = broken ] && [ "${KEEP_CLAUDE:-0}" = 1 ] && [[ "$m" == claude* ]]; then

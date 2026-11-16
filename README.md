@@ -30,7 +30,7 @@ Your lab project already has a Gemini Enterprise app. The setup connects it to t
    - **Paste:** copy the whole of `setup/PASTE-INTO-CLOUD-SHELL.txt` into Cloud Shell and press Enter.
 3. Watch the steps finish. The script:
    - connects Google Drive, Gmail and Google Calendar to your app
-   - turns on Google Search, image generation, Canvas, every model in the model picker, and the no-code agent builder
+   - turns on Google Search, image generation, Canvas, every model your lab can use (it tests each one and switches off any the free trial doesn't include), and the no-code agent builder
    - copies the demo data into your My Drive under **Graywing Ag Systems (Demo Data)**, and makes an empty **My Uploads** folder for your own files
 
    The green box at the end shows your **app link**, your **Drive folder link** and your **My Uploads link**. To see them again later, run `cat ~/graywing-lab/links.txt`.

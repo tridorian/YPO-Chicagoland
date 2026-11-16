@@ -52,7 +52,7 @@ Without this the agent can't see the files or take actions. Don't start building
 2. Paste the starter prompt below and send it. The builder drafts the name, description and instructions.
 3. Data: Add data sources & tools → Google Drive. If you can pick a folder, pick Graywing Ag Systems (Demo Data). [VERIFY UI]
 4. Actions: in the same place, add Gmail, Google Calendar, Google Docs, Google Slides and Google Sheets, and allow them when asked. [VERIFY UI] These are for actions only; the starter prompt keeps all facts coming from Drive.
-5. Model: in the agent's settings, pick a Gemini model (for example the newest Gemini Pro or Flash shown), not Auto. [VERIFY UI] Auto can pick a model that isn't available in the lab and stop mid-answer.
+5. Model: in the agent's settings, pick a Gemini model (for example the newest Gemini Pro or Flash shown). [VERIFY UI] The picker only lists models your lab can use: the setup switches off the ones the free trial doesn't include (the newest Gemini 4 models and Claude). If an answer stops with "not available during the free trial", run the setup again and pick another model.
 6. Open Preview and ask the five questions below. For the last two, check your Gmail Drafts, your Calendar and your Drive for what the agent made. The real clock is in November, so the Oct 19 event is in the past: open Calendar to Oct 19, 2026 to see it.
 7. Improve the answers with round 2 below, re-testing after each change.
 8. Keep it as a draft unless your facilitator says to publish.
