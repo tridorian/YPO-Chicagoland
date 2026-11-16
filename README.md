@@ -1,5 +1,7 @@
 # Graywing Ag Systems · Gemini Enterprise lab
 
+https://explore.qwiklabs.com/classrooms/21879/labs/117437
+
 Everything you need to set up a Gemini Enterprise app over the demo data for **Graywing Ag Systems**, build your own no-code **Chief of Staff** agent, and check its answers. Graywing is a fictional agriculture-equipment company; all names, numbers and documents are made up.
 
 ## What's in this repo
